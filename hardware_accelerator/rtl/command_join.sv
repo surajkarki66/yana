@@ -97,7 +97,7 @@ module CommandJoin #(
   logic [TOTAL_WIDTH-1:0] output_sink_data_out;
 
   logic [TIMESTEP_WIDTH-1:0] join_data_timestep;
-  assign join_data_timestep = join_data_out[TOTAL_WIDTH-1-:TIMESTEP_WIDTH];
+  assign join_data_timestep = join_data_out[TIMESTEP_WIDTH-1:0];
   assign too_late = (join_data_timestep < timestep_i) ? join_valid_out : 0;
 
   Pipeline_Sink #(
