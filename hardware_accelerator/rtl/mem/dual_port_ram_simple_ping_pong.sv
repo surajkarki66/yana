@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 
 module DualPortRamSimplePingPong #(
-    parameter VENDOR = "generic",
+    parameter string VENDOR = "generic",
     parameter RAM_WIDTH = 8,
     parameter RAM_ADDR_BITS = 4,
     parameter INIT_MEM_FILE = ""

@@ -3,7 +3,7 @@
 `include "global_params.vh"
 
 module Axon #(
-  parameter VENDOR = VENDOR_G,
+  parameter string VENDOR = VENDOR_G,
   parameter SPIKE_OUT_FIFO_DATA_WIDTH = CORE_NEURON_ID_WIDTH_G,
   parameter OUTPUT_BUFFER_DATA_WIDTH  = CORE_ROUTE_WIDTH_G,
 

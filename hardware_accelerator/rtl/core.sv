@@ -3,11 +3,11 @@
 `include "global_params.vh"
 
 module Core #(
-  parameter CORE_TYPE = "FULL",
+  parameter string CORE_TYPE = "FULL",
   parameter CORE_ID_X = 0,
   parameter CORE_ID_Y = 0,
 
-  parameter VENDOR                         = VENDOR_G,
+  parameter string VENDOR                         = VENDOR_G,
   parameter TIMESTEP_WIDTH                 = TIMESTEP_WIDTH_G,
   parameter CORE_FEEDBACK_DATA_WIDTH       = CORE_EVENT_WIDTH_G,
   parameter CORE_NEURON_ID_WIDTH           = CORE_NEURON_ID_WIDTH_G,

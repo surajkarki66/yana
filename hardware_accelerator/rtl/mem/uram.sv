@@ -4,7 +4,7 @@
 
 (* dont_touch = "yes" *)
 module Uram #(
-    parameter VENDOR = VENDOR_G,
+    parameter string VENDOR = VENDOR_G,
     parameter ADDR_WIDTH = 12,
     parameter DATA_WIDTH = 72,
     parameter ENTRY_WIDTH = 8,

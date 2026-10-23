@@ -11,6 +11,7 @@ hardware_accelerator/ip/*/gen/
 software_framework/datasets/
 # Ignore Python virtual environment
 .venv/
+venv
 # Ignore IDE specific files
 .vscode/
 # Ignore Verilator generated files

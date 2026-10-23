@@ -4,7 +4,7 @@
 `include "global_params.vh"
 
 module Synapse #(
-    parameter VENDOR = VENDOR_G,
+    parameter string VENDOR = VENDOR_G,
 
     parameter INPUT_DATA_NEURON_WIDTH  = CORE_NEURON_ID_WIDTH_G,
     parameter INPUT_DATA_SYNAPSE_WIDTH = CORE_WEIGHT_ID_WIDTH_G,

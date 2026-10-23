@@ -4,7 +4,7 @@
 
 (* dont_touch = "yes" *)
 module DualPortRamSimple #(
-  parameter VENDOR = VENDOR_G,
+  parameter string VENDOR = VENDOR_G,
   parameter ADDR_WIDTH = 10,
   parameter DATA_WIDTH = 32,
   parameter INIT_MEM_FILE = ""

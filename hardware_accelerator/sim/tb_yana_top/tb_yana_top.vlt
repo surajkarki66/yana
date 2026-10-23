@@ -1,6 +1,6 @@
 `verilator_config
 
-lint_off -rule MODMISSING
+// lint_off -rule MODMISSING
 
 lint_off -rule REALCVT -file "*/global_params.vh"
 
