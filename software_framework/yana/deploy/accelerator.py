@@ -264,39 +264,56 @@ class Accelerator():
         therefore equals the timestep latency between a reference-model layer
         and the matching accelerator core.
 
-        Recurrent routes (self-loops and feedback edges that close a cycle) do
-        not advance the feed-forward propagation, so they must not count toward
-        the hop length. This is achieved by only considering *simple* paths
-        (paths that never revisit a core): any edge whose target already lies on
-        the current path is a recurrent edge and is skipped. The depth of a core
-        is the maximum length among all such simple paths reaching it, i.e. the
-        longest feed-forward path from the input core.
+        Hops are counted between (core, layer) pairs rather than between cores,
+        because several layers can share one core: with three hidden layers on
+        two hidden cores, the path core 1 -> core 2 -> core 1 is feed-forward
+        (layer 1 -> layer 2 -> layer 3) and every hop costs a timestep.
+
+        Recurrent routes (a layer feeding itself, or feedback edges that close a
+        cycle) do not advance the feed-forward propagation, so they must not
+        count toward the hop length. This is achieved by only considering
+        *simple* paths (paths that never revisit a (core, layer) pair): any edge
+        whose target already lies on the current path is a recurrent edge and is
+        skipped. The depth of a core is the maximum length among all such simple
+        paths reaching any of its layers.
         """
-        # Forward adjacency, de-duplicated. Self-loops are recurrent by
-        # definition and are excluded here.
-        adjacency: Dict[int, set] = {}
+        local_to_layer: Dict[int, Dict[int, str]] = {
+            core_id: {local_id: global_id[0] for global_id, local_id in core.neuron_id_map.items()}
+            for core_id, core in self.cores.items()
+        }
+
+        # Forward adjacency between (core, layer) nodes, de-duplicated.
+        adjacency: Dict[Tuple[int, str], set] = {}
         for core_id, core in self.cores.items():
-            adjacency[core_id] = {
-                route.target_core
-                for routes in core.routes.values()
-                for route in routes
-                if route.target_core in self.cores and route.target_core != core_id
-            }
+            for source_local_id, routes in core.routes.items():
+                source = (core_id, local_to_layer[core_id][source_local_id])
+                targets = adjacency.setdefault(source, set())
+                for route in routes:
+                    if route.target_core not in self.cores:
+                        continue
+                    target = (route.target_core, local_to_layer[route.target_core][route.target_neuron])
+                    if target != source:
+                        targets.add(target)
 
-        depths: Dict[int, int] = {}
+        node_depths: Dict[Tuple[int, str], int] = {}
 
-        def visit(core_id: int, depth: int, on_path: set) -> None:
-            if core_id not in depths or depth > depths[core_id]:
-                depths[core_id] = depth
-            for target in adjacency[core_id]:
+        def visit(node: Tuple[int, str], depth: int, on_path: set) -> None:
+            if node not in node_depths or depth > node_depths[node]:
+                node_depths[node] = depth
+            for target in adjacency.get(node, ()):
                 if target in on_path:
-                    continue  # recurrent edge: would revisit a core on this path
+                    continue  # recurrent edge: would revisit a node on this path
                 on_path.add(target)
                 visit(target, depth + 1, on_path)
                 on_path.discard(target)
 
-        start = self.input_core.id
-        visit(start, 0, {start})
+        for node in adjacency:
+            if node[0] == self.input_core.id:
+                visit(node, 0, {node})
+
+        depths: Dict[int, int] = {self.input_core.id: 0}
+        for (core_id, _), depth in node_depths.items():
+            depths[core_id] = max(depth, depths.get(core_id, 0))
         return depths
 
     def print_summary(self):
