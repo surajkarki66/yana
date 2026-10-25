@@ -106,8 +106,8 @@ module tb_yana_top ();
         .output_data (uut_command_data_i),
         .empty       ()
     );
-
-    localparam int INPUT_DATA_FIFO_DEPTH = 2**16 + 2**12 + 2**10;
+    // localparam int INPUT_DATA_FIFO_DEPTH = 2**16 + 2**12 + 2**10;
+    localparam int INPUT_DATA_FIFO_DEPTH = 2**20;
     Pipeline_FIFO_Buffer #(
         .WORD_WIDTH(INPUT_DATA_BUFFER_WIDTH_LOCAL),
         .DEPTH     (INPUT_DATA_FIFO_DEPTH),

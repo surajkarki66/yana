@@ -16,6 +16,10 @@ from .custom_transforms import PadSliceToBins, ExpandDims
 
 def _get_dataset_by_name(dataset: str, save_to: str, transform: Optional[Callable], target_transform: Optional[Callable]):
     if dataset == "DVSGesture":
+        # figshare.com/ndownloader rejects scripted downloads, the ndownloader host serves the same files.
+        for attr in ("train_url", "test_url"):
+            url = getattr(tonic.datasets.DVSGesture, attr)
+            setattr(tonic.datasets.DVSGesture, attr, url.replace("https://figshare.com/ndownloader/", "https://ndownloader.figshare.com/"))
         trainset = tonic.datasets.DVSGesture(save_to=save_to, train=True, transform=transform, target_transform=target_transform)
         testset = tonic.datasets.DVSGesture(save_to=save_to, train=False, transform=transform, target_transform=target_transform)
     elif dataset == "NMNIST":
