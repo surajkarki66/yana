@@ -3,10 +3,26 @@
 `include "global_params.vh"
 
 module Node #(
-  parameter string  CORE_TYPE    = "FULL",  // "FULL", "INPUT", "OUTPUT"
+  parameter string  CORE_TYPE    = "FULL",  // "FULL", "INPUT", "OUTPUT", "CONV"
   parameter integer GRID_X_ID    = 0,
   parameter integer GRID_Y_ID    = 0,
   parameter integer DEEPEST_NODE = 0,
+
+  // CONV PE shape (ignored unless CORE_TYPE == "CONV")
+  parameter integer CONV_CIN      = 1,
+  parameter integer CONV_COUT     = 1,
+  parameter integer CONV_HIN      = 8,
+  parameter integer CONV_WIN      = 8,
+  parameter integer CONV_KH       = 3,
+  parameter integer CONV_KW       = 3,
+  parameter integer CONV_STRIDE_H = 1,
+  parameter integer CONV_STRIDE_W = 1,
+  parameter integer CONV_PAD_H    = 0,
+  parameter integer CONV_PAD_W    = 0,
+  parameter integer CONV_DIL_H    = 1,
+  parameter integer CONV_DIL_W    = 1,
+  parameter integer CONV_DEST_DX  = 0,
+  parameter integer CONV_DEST_DY  = 0,
 
   parameter integer TIMESTEP_WIDTH = TIMESTEP_WIDTH_G,
 
@@ -487,25 +503,62 @@ module Node #(
   logic                           core_to_router_valid;
   logic [DATA_FABRIC_WIDTH_X-1:0] core_to_router_data;
 
-  Core #(
-    .CORE_TYPE(CORE_TYPE),
-    .CORE_ID_X(GRID_X_ID),
-    .CORE_ID_Y(GRID_Y_ID)
-  ) u_core (
-    .clk_i      (clk_i),
-    .rst_i      (rst_local_q),
-    .enable_i   (enable_local_q),
-    .timestep_i (timestep_local_q),
-    .init_i     (init_local_q),
-    .core_done_o(core_done_d),
-    .core_idle_o(core_idle_d),
-    .packet_in_ready_o(router_to_core_ready),
-    .packet_in_valid_i(router_to_core_valid),
-    .packet_in_data_i (router_to_core_data),
-    .packet_out_ready_i(core_to_router_ready),
-    .packet_out_valid_o(core_to_router_valid),
-    .packet_out_data_o (core_to_router_data)
-  );
+  generate
+    if (CORE_TYPE == "CONV") begin : gen_conv_core
+      ConvCore #(
+        .CORE_ID_X(GRID_X_ID),
+        .CORE_ID_Y(GRID_Y_ID),
+        .CIN      (CONV_CIN),
+        .COUT     (CONV_COUT),
+        .HIN      (CONV_HIN),
+        .WIN      (CONV_WIN),
+        .KH       (CONV_KH),
+        .KW       (CONV_KW),
+        .STRIDE_H (CONV_STRIDE_H),
+        .STRIDE_W (CONV_STRIDE_W),
+        .PAD_H    (CONV_PAD_H),
+        .PAD_W    (CONV_PAD_W),
+        .DIL_H    (CONV_DIL_H),
+        .DIL_W    (CONV_DIL_W),
+        .DEST_DX  (CONV_DEST_DX),
+        .DEST_DY  (CONV_DEST_DY)
+      ) u_core (
+        .clk_i      (clk_i),
+        .rst_i      (rst_local_q),
+        .enable_i   (enable_local_q),
+        .timestep_i (timestep_local_q),
+        .init_i     (init_local_q),
+        .core_done_o(core_done_d),
+        .core_idle_o(core_idle_d),
+        .packet_in_ready_o(router_to_core_ready),
+        .packet_in_valid_i(router_to_core_valid),
+        .packet_in_data_i (router_to_core_data),
+        .packet_out_ready_i(core_to_router_ready),
+        .packet_out_valid_o(core_to_router_valid),
+        .packet_out_data_o (core_to_router_data)
+      );
+    end else begin : gen_std_core
+      Core #(
+        .CORE_TYPE(CORE_TYPE),
+        .CORE_ID_X(GRID_X_ID),
+        .CORE_ID_Y(GRID_Y_ID)
+      ) u_core (
+        .clk_i      (clk_i),
+        .rst_i      (rst_local_q),
+        .enable_i   (enable_local_q),
+        .timestep_i (timestep_local_q),
+        .init_i     (init_local_q),
+        .core_done_o(core_done_d),
+        .core_idle_o(core_idle_d),
+        .packet_in_ready_o(router_to_core_ready),
+        .packet_in_valid_i(router_to_core_valid),
+        .packet_in_data_i (router_to_core_data),
+        .packet_out_ready_i(core_to_router_ready),
+        .packet_out_valid_o(core_to_router_valid),
+        .packet_out_data_o (core_to_router_data)
+      );
+    end
+  endgenerate
 
   Router #(
     .PACKET_WIDTH(DATA_FABRIC_WIDTH_X),

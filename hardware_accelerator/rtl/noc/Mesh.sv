@@ -9,7 +9,27 @@ module Mesh #(
   parameter integer DATA_FABRIC_WIDTH_X  = MESH_PACKET_DATA_WIDTH_X_G,
   parameter integer DATA_FABRIC_WIDTH_Y  = MESH_PACKET_DATA_WIDTH_Y_G,
   parameter integer NODE_DONE_IN_MAX_CNT = NODE_DONE_IN_MAX_CNT_G,
-  parameter integer NODE_IDLE_IN_MAX_CNT = NODE_IDLE_IN_MAX_CNT_G
+  parameter integer NODE_IDLE_IN_MAX_CNT = NODE_IDLE_IN_MAX_CNT_G,
+
+  // Optional CONV PE. Default 0 keeps the original INPUT/FULL/OUTPUT map so
+  // existing feed-forward testbenches are unchanged.
+  parameter bit     HAS_CONV      = 0,
+  parameter integer CONV_X        = 1,
+  parameter integer CONV_Y        = 0,
+  parameter integer CONV_DEST_X   = 0,
+  parameter integer CONV_DEST_Y   = 1,
+  parameter integer CONV_CIN      = 1,
+  parameter integer CONV_COUT     = 1,
+  parameter integer CONV_HIN      = 8,
+  parameter integer CONV_WIN      = 8,
+  parameter integer CONV_KH       = 3,
+  parameter integer CONV_KW       = 3,
+  parameter integer CONV_STRIDE_H = 1,
+  parameter integer CONV_STRIDE_W = 1,
+  parameter integer CONV_PAD_H    = 0,
+  parameter integer CONV_PAD_W    = 0,
+  parameter integer CONV_DIL_H    = 1,
+  parameter integer CONV_DIL_W    = 1
 ) (
   input  logic clk_i,
 
@@ -410,10 +430,25 @@ module Mesh #(
           .CORE_TYPE (
             (gi == 0 && gj == 0)         ? "INPUT"  :
             (gi == X-1 && gj == Y-1)     ? "OUTPUT" :
+            (HAS_CONV && gi == CONV_X && gj == CONV_Y) ? "CONV" :
                                            "FULL"),
           .GRID_X_ID             (gi),
           .GRID_Y_ID             (gj),
-          .DEEPEST_NODE          ((gi == X - 1 && gj == Y - 1) ? 1 : 0)
+          .DEEPEST_NODE          ((gi == X - 1 && gj == Y - 1) ? 1 : 0),
+          .CONV_CIN              (CONV_CIN),
+          .CONV_COUT             (CONV_COUT),
+          .CONV_HIN              (CONV_HIN),
+          .CONV_WIN              (CONV_WIN),
+          .CONV_KH               (CONV_KH),
+          .CONV_KW               (CONV_KW),
+          .CONV_STRIDE_H         (CONV_STRIDE_H),
+          .CONV_STRIDE_W         (CONV_STRIDE_W),
+          .CONV_PAD_H            (CONV_PAD_H),
+          .CONV_PAD_W            (CONV_PAD_W),
+          .CONV_DIL_H            (CONV_DIL_H),
+          .CONV_DIL_W            (CONV_DIL_W),
+          .CONV_DEST_DX          (CONV_DEST_X - CONV_X),
+          .CONV_DEST_DY          (CONV_Y - CONV_DEST_Y)
         ) u_node (
           .clk_i(clk_i),
 

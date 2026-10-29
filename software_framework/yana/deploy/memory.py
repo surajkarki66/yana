@@ -4,7 +4,7 @@ from math import ceil
 
 import numpy as np
 
-from yana.deploy.fixed_point import int_to_binary_str
+from yana.deploy.fixed_point import FixedPoint, int_to_binary_str
 from yana.core.config import AcceleratorConfig
 
 from .core import Core
@@ -245,10 +245,18 @@ def write_core_leak_lut(core: Core, acc_config: AcceleratorConfig, leak_lut_file
     quant_opts_lut = core.config.quant_config.format_tau_inv_l
     value_width = quant_opts_lut.integer_length + quant_opts_lut.fraction_length
     addr_width = core.config.neuron_config.leak_lut_addr_width
+    hardware_len = core.config.neuron_config.leak_lut_len
     packet = Packet(value_width)
+    zero = FixedPoint(0, quant_opts_lut)
+
+    # Sim LUT may be shorter than the hardware table (training effective length).
+    # Pad with zeros so RTL init covers the full address space.
+    entries = list(core.leak_lut)
+    if hardware_len > len(entries):
+        entries.extend([zero] * (hardware_len - len(entries)))
 
     with open(leak_lut_file_path, "w") as lut_file:
-        for addr, entry in enumerate(core.leak_lut):
+        for addr, entry in enumerate(entries):
             packet.add_value(entry.value, value_width)
             packet.construct()
 

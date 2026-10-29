@@ -1,0 +1,16 @@
+`verilator_config
+
+lint_off -rule REALCVT -file "*/global_params.vh"
+lint_off -rule WIDTHTRUNC
+lint_off -rule WIDTHEXPAND
+lint_off -rule SELRANGE
+lint_off -rule UNUSED
+lint_off -rule UNUSEDSIGNAL
+lint_off -rule UNUSEDPARAM
+lint_off -rule BLKSEQ
+lint_off -rule INITIALDLY
+lint_off -rule STMTDLY
+lint_off -rule DECLFILENAME
+lint_off -rule EOFNEWLINE
+lint_off -rule SYMRSVDWORD
+lint_off -rule MODMISSING

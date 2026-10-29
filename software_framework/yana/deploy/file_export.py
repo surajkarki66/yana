@@ -22,15 +22,72 @@ def write_accelerator_memories(accelerator: Accelerator, output_dir: str, accele
     assert os.path.isdir(output_dir), f"'{output_dir}' is not a directory"
 
     for core in accelerator.cores.values():
-        write_weights = core.config.type is not CoreConfig.Type.INPUT
-        write_routes  = core.config.type is not CoreConfig.Type.OUTPUT
+        # CONV stores geometry in the PE, not in synapse/axon RAMs.
+        # Dummy hop-count routes on the CONV core must not be programmed into RTL.
+        is_conv = core.config.type == CoreConfig.Type.CONV
+        write_weights = core.config.type not in (CoreConfig.Type.INPUT, CoreConfig.Type.CONV)
+        write_routes  = core.config.type not in (CoreConfig.Type.OUTPUT, CoreConfig.Type.CONV)
+        # CONV has no LIF state machine; skip threshold / tau / leak init files.
+        write_neuron_params = not is_conv
 
         write_core_memories(
             core, f"core_{core.id}",
             output_dir, accelerator_config,
-            write_weights=write_weights, write_routes=write_routes,
+            write_weights=write_weights,
+            write_routes=write_routes,
+            write_threshold=write_neuron_params,
+            write_tau_mem_inv=write_neuron_params,
+            write_leak_lut=write_neuron_params,
             as_events=as_events
         )
+
+    write_conv_pe_config(accelerator, output_dir, accelerator_config)
+
+
+def write_conv_pe_config(
+    accelerator: Accelerator,
+    output_dir: str,
+    accelerator_config: AcceleratorConfig,
+    filename: str = "conv_pe_params.txt",
+):
+    """Write Mesh/ConvCore parameter values for RTL bring-up / TB overrides.
+
+    Format (one ``key=value`` per line) matches the Mesh ``CONV_*`` parameters.
+    Absent when the accelerator has no CONV core.
+    """
+    conv_core = getattr(accelerator, "conv_core", None)
+    if conv_core is None or conv_core.conv is None:
+        return
+
+    geom = conv_core.conv.geom
+    dest_core_id = conv_core.conv.dest_core_of_neuron[0]
+    conv_x, conv_y = accelerator_config.core_id_to_xy(conv_core.id)
+    dest_x, dest_y = accelerator_config.core_id_to_xy(dest_core_id)
+
+    path = os.path.join(output_dir, filename)
+    with open(path, "w") as f:
+        f.write("# Auto-generated CONV PE parameters for Mesh / ConvCore\n")
+        f.write(f"HAS_CONV=1\n")
+        f.write(f"CONV_X={conv_x}\n")
+        f.write(f"CONV_Y={conv_y}\n")
+        f.write(f"CONV_DEST_X={dest_x}\n")
+        f.write(f"CONV_DEST_Y={dest_y}\n")
+        f.write(f"CONV_CIN={geom.in_channels}\n")
+        f.write(f"CONV_COUT={geom.out_channels}\n")
+        f.write(f"CONV_HIN={geom.in_h}\n")
+        f.write(f"CONV_WIN={geom.in_w}\n")
+        f.write(f"CONV_KH={geom.k_h}\n")
+        f.write(f"CONV_KW={geom.k_w}\n")
+        f.write(f"CONV_STRIDE_H={geom.stride[0]}\n")
+        f.write(f"CONV_STRIDE_W={geom.stride[1]}\n")
+        f.write(f"CONV_PAD_H={geom.padding[0]}\n")
+        f.write(f"CONV_PAD_W={geom.padding[1]}\n")
+        f.write(f"CONV_DIL_H={geom.dilation[0]}\n")
+        f.write(f"CONV_DIL_W={geom.dilation[1]}\n")
+        f.write(f"CONV_OUT_H={geom.out_h}\n")
+        f.write(f"CONV_OUT_W={geom.out_w}\n")
+        f.write(f"CONV_N_TAPS={geom.n_taps}\n")
+        f.write(f"CONV_DEST_CORE_ID={dest_core_id}\n")
 
 def write_input_events(
     input_events: List[Tuple[int, int]],

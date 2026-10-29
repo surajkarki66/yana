@@ -98,13 +98,10 @@ def _create_leak_quantizer(quant_config: QuantConfig) -> Quantizer:
 
 
 def _compute_lut_length(tau_inv_mem: float) -> int:
-    """Compute LUT length for leak factor lookup table. It may vary compared to the accelerator's LUT length, but this shouldn't be a problem.
-    
-    Args:
-        tau_inv_mem: Inverse membrane time constant
-        
-    Returns:
-        LUT length as next power of 2
+    """Compute effective leak-LUT length: ``next_power_of_2(1 / tau_inv_mem)``.
+
+    The accelerator may allocate a longer hardware LUT; deploy zeros entries at
+    and beyond this length so sim matches training (see ``_create_leak_lut``).
     """
     return next_power_of_2(1 / tau_inv_mem)
 

@@ -10,7 +10,8 @@ from yana.core.logging import info, verbose, trace, error, warn
 
 from yana.core.config import AcceleratorConfig, CoreConfig
 
-from .core import Core, Route
+from .core import Core, ConvRuntime, Route
+from .conv import ConvGeometry, as_pair
 from .mapping import CoreMap
 from .operator_graph import OperatorGraph, Operator
 
@@ -123,26 +124,33 @@ class Accelerator():
 
         input_core = None
         output_core = None
+        conv_core = None
         self.cores = {}
 
         for id, core_config in acc_config.core_configs.items():
             self.cores[id] = Core(id, core_config)
-            # Populate input/output core
+            # Populate input/output/conv cores
             if core_config.type == CoreConfig.Type.INPUT:
                 assert input_core is None, "Only a single input core is allowed"
                 input_core = self.cores[id]
             if core_config.type == CoreConfig.Type.OUTPUT:
                 assert output_core is None, "Only a single output core is allowed"
                 output_core = self.cores[id]
+            if core_config.type == CoreConfig.Type.CONV:
+                assert conv_core is None, "Only a single CONV core is allowed"
+                conv_core = self.cores[id]
 
         assert input_core is not None, "Input core is required."
         assert output_core is not None, "Output core is required."
         self.input_core = input_core
         self.output_core = output_core
+        self.conv_core = conv_core
 
         # These are the node sequences supported by the accelerator
         self.VALID_SEQUENCES: List[Tuple[OpSequence, Callable[[List[Operator]], None]]] = [
             ([nir.Input], self._add_input),
+            # v1: Conv2d feeds a spiking feature-map LIF on HIDDEN cores only.
+            ([nir.Conv2d, nir.LIF], self._add_conv),
             ([(nir.Affine, nir.Linear), (nir.LIF, nir.LI, nir.I)], self._add_linear),
             ([nir.Output], self._add_output)
         ]
@@ -291,7 +299,13 @@ class Accelerator():
                 for route in routes:
                     if route.target_core not in self.cores:
                         continue
-                    target = (route.target_core, local_to_layer[route.target_core][route.target_neuron])
+                    dest_core = self.cores[route.target_core]
+                    if dest_core.config.type == CoreConfig.Type.CONV:
+                        # CONV has no per-axon LIF neurons; every input axon lands on the PE.
+                        dummy = next(iter(dest_core.neuron_id_map.keys()))[0]
+                        target = (dest_core.id, dummy)
+                    else:
+                        target = (route.target_core, local_to_layer[route.target_core][route.target_neuron])
                     if target != source:
                         targets.add(target)
 
@@ -410,6 +424,167 @@ class Accelerator():
         input_op = sequence[0].nir_node
         assert isinstance(input_op, nir.Input)
         assert len(input_op.input_type) == 1, "Only one input tensor allowed."
+
+    def _add_conv(self, sequence: List[Operator]):
+        """Map Conv2d → LIF onto the CONV PE + dest hidden cores (shared kernel, no unroll)."""
+        info(f"Conv sequence: {[op.name for op in sequence]}")
+        conv_op, act_op = sequence[0], sequence[1]
+        conv_node = conv_op.nir_node
+        act_node = act_op.nir_node
+        assert isinstance(conv_node, nir.Conv2d)
+        assert isinstance(act_node, nir.LIF)
+        if self.conv_core is None:
+            raise ValueError(
+                "Graph contains Conv2d but no CONV core is configured. "
+                "Use yana/core/config/default/accelerator_conv.yaml (or add a core with type CONV)."
+            )
+
+        groups = int(np.asarray(conv_node.groups).reshape(-1)[0]) if conv_node.groups is not None else 1
+        assert groups == 1, f"Grouped Conv2d is not supported (groups={groups})"
+        if conv_node.bias is not None:
+            assert _is_zero(conv_node.bias), "Bias is not allowed for Conv2d on YANA."
+
+        assert len(conv_op.pre_ops) == 1, "Conv2d must have a single predecessor"
+        pre_op = conv_op.pre_ops[0]
+        pre_node = pre_op.nir_node
+        assert isinstance(pre_node, (nir.Input, nir.LIF)), (
+            f"Conv2d predecessor must be Input or LIF, found {type(pre_node).__name__}"
+        )
+
+        if isinstance(conv_node.weight, torch.Tensor):
+            weights = conv_node.weight.detach().cpu().numpy()
+        else:
+            weights = np.asarray(conv_node.weight)
+        assert weights.ndim == 4, f"Conv2d weight must be 4-D, got {weights.shape}"
+        out_ch, in_ch, k_h, k_w = (int(x) for x in weights.shape)
+
+        in_shape = np.asarray(next(iter(pre_node.input_type.values() if isinstance(pre_node, nir.Input)
+                                        else pre_node.output_type.values()))).astype(int).tolist()
+        if len(in_shape) == 2:
+            in_h, in_w = int(in_shape[0]), int(in_shape[1])
+            assert in_ch == 1, f"2-D input shape {in_shape} but kernel has Cin={in_ch}"
+        elif len(in_shape) == 3:
+            # NIR / ToFrame layout is (C, H, W)
+            c_in, in_h, in_w = int(in_shape[0]), int(in_shape[1]), int(in_shape[2])
+            assert c_in == in_ch, f"Input channels {c_in} != kernel Cin {in_ch}"
+        else:
+            raise ValueError(f"Unsupported Conv2d input shape {in_shape}")
+
+        geom = ConvGeometry(
+            in_channels=in_ch,
+            out_channels=out_ch,
+            in_h=in_h,
+            in_w=in_w,
+            kernel=(k_h, k_w),
+            stride=as_pair(conv_node.stride),
+            padding=as_pair(conv_node.padding),
+            dilation=as_pair(conv_node.dilation) if conv_node.dilation is not None else (1, 1),
+        )
+
+        n_in = geom.n_in_axons
+        n_out = geom.n_out_neurons
+        assert n_in <= self.acc_config.neurons_per_core, (
+            f"Conv2d input axons {n_in} exceed neuron_id width "
+            f"({self.acc_config.neurons_per_core}). Increase neurons_per_core or reduce C·H·W."
+        )
+        assert n_out <= self.acc_config.neurons_per_core, (
+            f"Conv2d feature map ({out_ch}, {geom.out_h}, {geom.out_w}) = {n_out} neurons "
+            f"exceeds neurons_per_core={self.acc_config.neurons_per_core}. "
+            f"v1 RTL sends all charges to one HIDDEN core (fixed DEST_DX/DY)."
+        )
+
+        layer_name = act_op.name
+        pre_layer_name = pre_op.name
+        conv_core = self.conv_core
+
+        # Dummy neuron so network_depth can treat the CONV PE as one hop.
+        conv_core.add_neuron((conv_op.name, 0), compress=True)
+
+        if self.validate_neuron_params:
+            # Validate against a dest hidden core (all hidden cores share neuron config).
+            hidden_ids = [cid for cid, c in self.cores.items() if c.config.type == CoreConfig.Type.HIDDEN]
+            assert hidden_ids, "Conv2d → LIF requires at least one HIDDEN core"
+            _validate_neuron_params(act_node, self.cores[hidden_ids[0]], self.constraints_fatal)
+
+        dest_core_of_neuron: List[int] = []
+        dest_local_of_neuron: List[int] = []
+        dest_cores_used: Dict[int, Core] = {}
+        for neuron_id in range(n_out):
+            dest_core_id = self.core_map[layer_name][neuron_id]
+            dest_core = self.cores[dest_core_id]
+            assert dest_core.config.type == CoreConfig.Type.HIDDEN, (
+                f"Conv LIF neurons must be mapped to HIDDEN cores, got {dest_core.config.type.name}"
+            )
+            # compress=False keeps core-local id == NCHW-flat id, matching ConvPE.encode_out.
+            local_id = dest_core.add_neuron((layer_name, neuron_id), compress=False)
+            assert local_id == neuron_id, (
+                f"Conv feature-map neuron {neuron_id} mapped to local id {local_id}; "
+                f"RTL ConvPE addresses neurons geometrically and requires identity mapping."
+            )
+            dest_core_of_neuron.append(dest_core_id)
+            dest_local_of_neuron.append(local_id)
+            dest_cores_used[dest_core_id] = dest_core
+
+        assert len(dest_cores_used) == 1, (
+            f"v1 CONV PE has a single fixed NoC destination (DEST_DX/DY); "
+            f"feature-map LIF must sit on one HIDDEN core, got {sorted(dest_cores_used.keys())}"
+        )
+
+        # Shared kernel: one sequential copy on the dest core (tap_id == weight RAM index).
+        zero_taps: set = set()
+        for dest_core in dest_cores_used.values():
+            assert len(dest_core.weights) == 0, (
+                f"CONV kernel must occupy the start of dest core {dest_core.id} weight RAM "
+                f"(found {len(dest_core.weights)} existing weights)"
+            )
+            for cout in range(out_ch):
+                for cin in range(in_ch):
+                    for ky in range(k_h):
+                        for kx in range(k_w):
+                            tap_id = dest_core.add_weight_sequential(float(weights[cout, cin, ky, kx]))
+                            if dest_core.weights[tap_id].value == 0:
+                                zero_taps.add(tap_id)
+
+        conv_core.conv = ConvRuntime(
+            geom=geom,
+            dest_layer=layer_name,
+            dest_core_of_neuron=dest_core_of_neuron,
+            dest_local_of_neuron=dest_local_of_neuron,
+            zero_taps=zero_taps,
+        )
+
+        # One hop-count route from the CONV dummy neuron to the dest core.
+        dest_core_id = next(iter(dest_cores_used))
+        conv_core.add_route((conv_op.name, 0), Route(dest_core_id, 0, 0))
+
+        # INPUT (or previous LIF) axons: one route per spatial location onto the CONV PE.
+        for axon_id in range(n_in):
+            if isinstance(pre_node, nir.Input):
+                source_core = self.input_core
+            else:
+                pre_core_id = self.core_map[pre_layer_name][axon_id]
+                source_core = self.cores[pre_core_id]
+                if source_core.get_core_local_id((pre_layer_name, axon_id)) == -1:
+                    continue
+            # payload.neuron_id on the CONV core is the flattened input axon (cin, y, x).
+            route = Route(conv_core.id, axon_id, 0)
+            source_core.add_route((pre_layer_name, axon_id), route)
+
+        cfg = conv_core.config.conv_config
+        if cfg is not None:
+            cfg.in_channels = in_ch
+            cfg.out_channels = out_ch
+            cfg.kernel_size = (k_h, k_w)
+            cfg.stride = geom.stride
+            cfg.padding = geom.padding
+            cfg.dilation = geom.dilation
+            cfg.in_hw = (in_h, in_w)
+
+        info(
+            f"  CONV PE: in=({in_ch},{in_h},{in_w}) k={k_h}x{k_w} stride={geom.stride} "
+            f"pad={geom.padding} -> out=({out_ch},{geom.out_h},{geom.out_w}), "
+            f"taps={geom.n_taps}, dest_core={dest_core_id}"
+        )
 
     def _add_linear(self, sequence: List[Operator]):
         info(f"Linear sequence: {[op.name for op in sequence]}")

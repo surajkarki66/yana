@@ -13,7 +13,27 @@ module YanaTop #(
     parameter INPUT_DATA_BUFFER_WIDTH  = INPUT_BUFFER_WIDTH_G,
     parameter OUTPUT_DATA_BUFFER_WIDTH = OUTPUT_BUFFER_WIDTH_G,
     // Control unit
-    parameter CONTROL_UNIT_STATUS_REGISTER_WIDTH = CONTROL_UNIT_STATUS_REGISTER_WIDTH_G
+    parameter CONTROL_UNIT_STATUS_REGISTER_WIDTH = CONTROL_UNIT_STATUS_REGISTER_WIDTH_G,
+
+    // Optional CONV PE (default off — existing FF TBs unchanged).
+    // Values should match deploy export conv_pe_params.txt.
+    parameter bit     HAS_CONV      = 0,
+    parameter integer CONV_X        = 1,
+    parameter integer CONV_Y        = 0,
+    parameter integer CONV_DEST_X   = 0,
+    parameter integer CONV_DEST_Y   = 1,
+    parameter integer CONV_CIN      = 1,
+    parameter integer CONV_COUT     = 1,
+    parameter integer CONV_HIN      = 8,
+    parameter integer CONV_WIN      = 8,
+    parameter integer CONV_KH       = 3,
+    parameter integer CONV_KW       = 3,
+    parameter integer CONV_STRIDE_H = 1,
+    parameter integer CONV_STRIDE_W = 1,
+    parameter integer CONV_PAD_H    = 0,
+    parameter integer CONV_PAD_W    = 0,
+    parameter integer CONV_DIL_H    = 1,
+    parameter integer CONV_DIL_W    = 1
 )(
     input  logic clk_i,
     input  logic rstn_i,
@@ -166,7 +186,25 @@ module YanaTop #(
     assign cu_in_done = mesh_done;
     assign cu_in_idle = mesh_idle;
 
-    Mesh u_mesh (
+    Mesh #(
+        .HAS_CONV     (HAS_CONV),
+        .CONV_X       (CONV_X),
+        .CONV_Y       (CONV_Y),
+        .CONV_DEST_X  (CONV_DEST_X),
+        .CONV_DEST_Y  (CONV_DEST_Y),
+        .CONV_CIN     (CONV_CIN),
+        .CONV_COUT    (CONV_COUT),
+        .CONV_HIN     (CONV_HIN),
+        .CONV_WIN     (CONV_WIN),
+        .CONV_KH      (CONV_KH),
+        .CONV_KW      (CONV_KW),
+        .CONV_STRIDE_H(CONV_STRIDE_H),
+        .CONV_STRIDE_W(CONV_STRIDE_W),
+        .CONV_PAD_H   (CONV_PAD_H),
+        .CONV_PAD_W   (CONV_PAD_W),
+        .CONV_DIL_H   (CONV_DIL_H),
+        .CONV_DIL_W   (CONV_DIL_W)
+    ) u_mesh (
         .clk_i           (clk_i),
         .rst_i           (cu_out_rst_gen),
         .enable_i        (cu_out_mesh_en),

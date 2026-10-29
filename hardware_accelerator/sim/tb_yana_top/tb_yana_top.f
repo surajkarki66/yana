@@ -15,6 +15,8 @@ tb_yana_top.sv
 ../../rtl/axon.sv
 ../../rtl/command_join.sv
 ../../rtl/command_preprocessor.sv
+../../rtl/conv_core.sv
+../../rtl/conv_pe.sv
 ../../rtl/control/control_unit_core_cmd_gen.sv
 ../../rtl/control/control_unit.sv
 ../../rtl/core.sv

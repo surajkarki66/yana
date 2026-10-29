@@ -1,11 +1,13 @@
 import copy
 import struct
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, List, NamedTuple, Optional, Set, Tuple
 
 from yana.deploy.fixed_point import FixedPoint, float_to_fixed_point, max_value, min_value
 from yana.core.logging import verbose
 
 from yana.core.config import CoreConfig
+from yana.deploy.conv import ConvGeometry, expand_input_axon
 
 class Route(NamedTuple):
     target_core: int
@@ -15,9 +17,36 @@ class Route(NamedTuple):
 GlobalID = Tuple[str, int]
 
 
+@dataclass
+class ConvRuntime:
+    """State kept on a CONV core: geometry plus dest lookup for the following LIF layer."""
+    geom: ConvGeometry
+    dest_layer: str
+    dest_core_of_neuron: List[int]
+    dest_local_of_neuron: List[int]
+    zero_taps: Set[int] = field(default_factory=set)
+    pending_axons: List[int] = field(default_factory=list)
+
+
 def _to_float32(x: float) -> float:
     """Round a float64 to float32 precision, matching PyTorch's default tensor dtype."""
     return struct.unpack('f', struct.pack('f', x))[0]
+
+
+def _next_power_of_2(x: int) -> int:
+    x = int(x)
+    return 1 if x == 0 else 2 ** (x - 1).bit_length()
+
+
+def _effective_leak_lut_len(tau_mem_inv: float, hardware_len: int) -> int:
+    """Training truncates leak at ``next_power_of_2(1/tau)`` (see neuron factory).
+
+    Hardware may expose a longer LUT; entries at and beyond the training length must
+    be zero so sparse layers (e.g. Conv→LIF) stay bit-exact with the torch model.
+    """
+    if tau_mem_inv <= 0 or hardware_len <= 0:
+        return hardware_len
+    return min(_next_power_of_2(int(1.0 / tau_mem_inv)), hardware_len)
 
 
 def _create_leak_lut(core_config: CoreConfig) -> List[FixedPoint]:
@@ -29,12 +58,15 @@ def _create_leak_lut(core_config: CoreConfig) -> List[FixedPoint]:
     # computes torch.pow(1 - tau_mem_inv_l, k) in float32.  Using float64 throughout
     # causes 1-ULP mismatches at large LUT indices for small tau_inv values.
     leak_per_ts_f32 = _to_float32(1.0 - _to_float32(core_config.neuron_config.tau_mem_inv))
-    entries = core_config.neuron_config.leak_lut_len
+    hardware_len = core_config.neuron_config.leak_lut_len
+    # Match training ``leak_factor_lut_length``: sim treats indices beyond this as
+    # out-of-range (membrane wiped). Export pads zeros out to hardware_len.
+    effective = _effective_leak_lut_len(core_config.neuron_config.tau_mem_inv, hardware_len)
 
     # First entry (ts_diff = 0) is always 0.
     # Each subsequent entry is computed independently to avoid float32 accumulation error.
     lut: List[FixedPoint] = [FixedPoint(0, core_config.quant_config.format_tau_inv_l)]
-    for k in range(1, entries):
+    for k in range(1, effective):
         lut.append(float_to_fixed_point(_to_float32(leak_per_ts_f32 ** k), core_config.quant_config.format_tau_inv_l))
 
     return lut
@@ -79,11 +111,18 @@ class Core():
         self._neuron_state_min = min_value(core_config.quant_config.format_state)
         self._neuron_state_max = max_value(core_config.quant_config.format_state)
 
+        self.conv: Optional[ConvRuntime] = None
+
         if core_config.type == CoreConfig.Type.OUTPUT:
             self.output_states: Dict[int, List[FixedPoint]] = {}
 
     def apply_input(self, dest_enc_spike: Route):
         assert dest_enc_spike.target_core == self.id, f"Wrong target core id: required {self.id}, got {dest_enc_spike.target_core}"
+        if self.config.type == CoreConfig.Type.CONV:
+            assert self.conv is not None, f"CONV core {self.id} has no conv runtime"
+            # Incoming event payload.neuron_id is the flattened input axon (cin, y, x).
+            self.conv.pending_axons.append(dest_enc_spike.target_neuron)
+            return
         # trace(f"    Spike: core [{dest_enc_spike.target_core}], neuron [{dest_enc_spike.target_neuron}], synapse [{dest_enc_spike.target_synapse}]")
 
         weight = self.weights[dest_enc_spike.target_synapse]
@@ -99,6 +138,9 @@ class Core():
         # trace(f"        Weight sum after:  {weight_sum_curr}")
 
     def apply_update(self, timestep: int, force_update: bool = False, injected_spikes: Optional[List[int]] = None) -> List[Route]:
+        if self.config.type == CoreConfig.Type.CONV:
+            return self._conv_expand()
+
         src_enc_spikes = injected_spikes if injected_spikes is not None else []
 
         # Swap weight sums
@@ -215,6 +257,31 @@ class Core():
         weight_id = self.weight_indices[weight]
         return weight_id
 
+    def add_weight_sequential(self, weight_value: float) -> int:
+        """Append a weight at the next index even if the value is 0 or a duplicate.
+
+        CONV kernel taps are addressed geometrically (``tap_id``), so slots must
+        stay aligned with ``(cout, cin, ky, kx)`` rather than unique-value packed.
+        """
+        weight = float_to_fixed_point(weight_value, self.config.quant_config.format_weights)
+        self.weights.append(weight)
+        if weight not in self.weight_indices:
+            self.weight_indices[weight] = len(self.weights) - 1
+        return len(self.weights) - 1
+
+    def _conv_expand(self) -> List[Route]:
+        assert self.conv is not None, f"CONV core {self.id} has no conv runtime"
+        dest_enc_spikes: List[Route] = []
+        for axon_id in self.conv.pending_axons:
+            for charge in expand_input_axon(self.conv.geom, axon_id):
+                if charge.tap_id in self.conv.zero_taps:
+                    continue
+                dest_core_id = self.conv.dest_core_of_neuron[charge.dest_neuron]
+                dest_local_id = self.conv.dest_local_of_neuron[charge.dest_neuron]
+                dest_enc_spikes.append(Route(dest_core_id, dest_local_id, charge.tap_id))
+        self.conv.pending_axons.clear()
+        return dest_enc_spikes
+
     def add_route(self, pre_global_id: GlobalID, route: Route):
         pre_core_local_id = self.get_core_local_id(pre_global_id)
         # If no core-local ID is given yet, create one.
@@ -239,6 +306,8 @@ class Core():
         self.states = [FixedPoint(0, self.config.quant_config.format_state) for _ in range(self.num_neurons())]
         self.last_ts = [0 for _ in range(self.num_neurons())]
         self.output_states = {}
+        if self.conv is not None:
+            self.conv.pending_axons.clear()
 
     def num_neurons(self):
         return len(self.neuron_id_map)

@@ -153,15 +153,43 @@ class QuantConfig(ConfigModel):
     format_tau_inv_l: QuantScheme
     format_tau_inv_j: QuantScheme
 
+class ConvConfig(ConfigModel):
+    """Shape of the CONV PE mapped onto a CONV core.
+
+    Deploy fills ``in_hw`` / channel counts from the NIR Conv2d node when they
+    are left at the defaults here. YAML may pin them for a fixed accelerator.
+    """
+    in_channels: int = 0
+    out_channels: int = 0
+    kernel_size: Tuple[int, int] = (3, 3)
+    stride: Tuple[int, int] = (1, 1)
+    padding: Tuple[int, int] = (0, 0)
+    dilation: Tuple[int, int] = (1, 1)
+    in_hw: Tuple[int, int] = (0, 0)
+
+    @field_validator("kernel_size", "stride", "padding", "dilation", "in_hw", mode="before")
+    @classmethod
+    def _coerce_pair(cls, v: Any) -> Tuple[int, int]:
+        if isinstance(v, int):
+            return (v, v)
+        if isinstance(v, (list, tuple)):
+            if len(v) == 1:
+                return (int(v[0]), int(v[0]))
+            return (int(v[0]), int(v[1]))
+        return v
+
+
 class CoreConfig(ConfigModel):
     class Type(Enum):
         INPUT   = 0
         HIDDEN  = 1
         OUTPUT  = 2
+        CONV    = 3
 
     type: Type
     neuron_config: NeuronConfig
     quant_config: QuantConfig
+    conv_config: Optional[ConvConfig] = None
 
     @field_validator('type', mode='before')
     @classmethod
@@ -256,6 +284,16 @@ class AcceleratorConfig(ConfigModel):
                 core_config_output = core_config
         assert core_config_output is not None, "Output core is required."
         return core_config_output
+
+    @property
+    def core_config_conv(self) -> Optional[CoreConfig]:
+        core_config_conv = None
+        for core_config in self.core_configs.values():
+            if core_config.type == CoreConfig.Type.CONV:
+                if core_config_conv is not None:
+                    raise ValueError("Currently only a single CONV core is supported")
+                core_config_conv = core_config
+        return core_config_conv
 
     #
     # General configuration

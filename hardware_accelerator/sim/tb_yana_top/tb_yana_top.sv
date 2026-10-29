@@ -5,13 +5,34 @@
 
 `timescale 1ns / 1ps
 
-module tb_yana_top ();
+module tb_yana_top #(
+    // Optional CONV PE — defaults match NMNIST conv deploy (conv_pe_params.txt).
+    // Keep HAS_CONV=0 for existing FF datasets; enable with verilator -GHAS_CONV=1.
+    parameter bit     HAS_CONV      = 0,
+    parameter integer CONV_X        = 1,
+    parameter integer CONV_Y        = 0,
+    parameter integer CONV_DEST_X   = 0,
+    parameter integer CONV_DEST_Y   = 1,
+    parameter integer CONV_CIN      = 2,
+    parameter integer CONV_COUT     = 8,
+    parameter integer CONV_HIN      = 17,
+    parameter integer CONV_WIN      = 17,
+    parameter integer CONV_KH       = 3,
+    parameter integer CONV_KW       = 3,
+    parameter integer CONV_STRIDE_H = 2,
+    parameter integer CONV_STRIDE_W = 2,
+    parameter integer CONV_PAD_H    = 1,
+    parameter integer CONV_PAD_W    = 1,
+    parameter integer CONV_DIL_H    = 1,
+    parameter integer CONV_DIL_W    = 1
+)();
 
     localparam int CLOCK_PERIOD  = 10;
     localparam int RESET_CYCLES  = 200;
 
     // Global simulation watchdog timeout (in ns). Overridable via +timeout_ns=<value>.
-    localparam int TIMEOUT_NS = 1_000_000_000;
+    // Use longint so values >2^31-1 (e.g. multi-minute CONV runs) do not wrap.
+    localparam longint TIMEOUT_NS = 1_000_000_000;
 
     localparam FIFO_DEPTH_LOCAL = 32;
 
@@ -128,7 +149,24 @@ module tb_yana_top ();
         .COMMAND_BUFFER_WIDTH              (COMMAND_BUFFER_WIDTH_LOCAL),
         .INPUT_DATA_BUFFER_WIDTH           (INPUT_DATA_BUFFER_WIDTH_LOCAL),
         .OUTPUT_DATA_BUFFER_WIDTH          (OUTPUT_DATA_BUFFER_WIDTH_LOCAL),
-        .CONTROL_UNIT_STATUS_REGISTER_WIDTH(CONTROL_UNIT_STATUS_REGISTER_WIDTH_LOCAL)
+        .CONTROL_UNIT_STATUS_REGISTER_WIDTH(CONTROL_UNIT_STATUS_REGISTER_WIDTH_LOCAL),
+        .HAS_CONV                          (HAS_CONV),
+        .CONV_X                            (CONV_X),
+        .CONV_Y                            (CONV_Y),
+        .CONV_DEST_X                       (CONV_DEST_X),
+        .CONV_DEST_Y                       (CONV_DEST_Y),
+        .CONV_CIN                          (CONV_CIN),
+        .CONV_COUT                         (CONV_COUT),
+        .CONV_HIN                          (CONV_HIN),
+        .CONV_WIN                          (CONV_WIN),
+        .CONV_KH                           (CONV_KH),
+        .CONV_KW                           (CONV_KW),
+        .CONV_STRIDE_H                     (CONV_STRIDE_H),
+        .CONV_STRIDE_W                     (CONV_STRIDE_W),
+        .CONV_PAD_H                        (CONV_PAD_H),
+        .CONV_PAD_W                        (CONV_PAD_W),
+        .CONV_DIL_H                        (CONV_DIL_H),
+        .CONV_DIL_W                        (CONV_DIL_W)
     ) uut (
         .clk_i          (uut_clk_i),
         .rstn_i         (uut_rstn_i),
@@ -1052,15 +1090,18 @@ module tb_yana_top ();
     endtask
 
     task automatic reset_between_samples(input int max_timestep);
-        issue_cu_reset(
-            RESET_STATES,
-            "neuron state reset (core 1:0)",
-            TIMESTEP_WIDTH_LOCAL'(max_timestep),
-            CORE_NEURON_ID_WIDTH_G'(0),
-            CORE_NEURON_ID_WIDTH_G'(NEURONS_PER_CORE_G - 1),
-            CORE_ID_X_WIDTH_G'(1),
-            CORE_ID_Y_WIDTH_G'(0)
-        );
+        // Skip the CONV PE tile — it has no LIF neuron-state RAM.
+        if (!(HAS_CONV && CONV_X == 1 && CONV_Y == 0)) begin
+            issue_cu_reset(
+                RESET_STATES,
+                "neuron state reset (core 1:0)",
+                TIMESTEP_WIDTH_LOCAL'(max_timestep),
+                CORE_NEURON_ID_WIDTH_G'(0),
+                CORE_NEURON_ID_WIDTH_G'(NEURONS_PER_CORE_G - 1),
+                CORE_ID_X_WIDTH_G'(1),
+                CORE_ID_Y_WIDTH_G'(0)
+            );
+        end
         issue_cu_reset(
             RESET_STATES,
             "neuron state reset (core 1:1)",
@@ -1180,9 +1221,20 @@ module tb_yana_top ();
     end
 
     initial begin
-        static int timeout_ns = TIMEOUT_NS;
+        static longint timeout_ns = TIMEOUT_NS;
+        static longint remaining;
+        static int chunk;
         void'($value$plusargs("timeout_ns=%d", timeout_ns));
-        repeat (timeout_ns) #1;
+        if (timeout_ns <= 0) begin
+            $fatal(1, "Invalid +timeout_ns=%0d (must be > 0)", timeout_ns);
+        end
+        // Cap each wait chunk to 32-bit so Verilator's repeat() is safe; loop for longint.
+        remaining = timeout_ns;
+        while (remaining > 0) begin
+            chunk = (remaining > 32'sd1_000_000_000) ? 1_000_000_000 : int'(remaining);
+            repeat (chunk) #1;
+            remaining -= chunk;
+        end
         $display("\nERROR: simulation watchdog timeout reached after %0d ns", timeout_ns);
         $finish;
     end
