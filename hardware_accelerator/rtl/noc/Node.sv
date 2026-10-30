@@ -3,7 +3,7 @@
 `include "global_params.vh"
 
 module Node #(
-  parameter string  CORE_TYPE    = "FULL",  // "FULL", "INPUT", "OUTPUT", "CONV"
+  parameter string  CORE_TYPE    = "FULL",  // "FULL", "INPUT", "OUTPUT", "CONV", "CONV1D"
   parameter integer GRID_X_ID    = 0,
   parameter integer GRID_Y_ID    = 0,
   parameter integer DEEPEST_NODE = 0,
@@ -23,6 +23,17 @@ module Node #(
   parameter integer CONV_DIL_W    = 1,
   parameter integer CONV_DEST_DX  = 0,
   parameter integer CONV_DEST_DY  = 0,
+
+  // CONV1D PE shape
+  parameter integer CONV1D_CIN    = 1,
+  parameter integer CONV1D_COUT   = 1,
+  parameter integer CONV1D_LIN    = 16,
+  parameter integer CONV1D_K      = 3,
+  parameter integer CONV1D_STRIDE = 1,
+  parameter integer CONV1D_PAD    = 0,
+  parameter integer CONV1D_DIL    = 1,
+  parameter integer CONV1D_DEST_DX = 0,
+  parameter integer CONV1D_DEST_DY = 0,
 
   parameter integer TIMESTEP_WIDTH = TIMESTEP_WIDTH_G,
 
@@ -522,6 +533,34 @@ module Node #(
         .DIL_W    (CONV_DIL_W),
         .DEST_DX  (CONV_DEST_DX),
         .DEST_DY  (CONV_DEST_DY)
+      ) u_core (
+        .clk_i      (clk_i),
+        .rst_i      (rst_local_q),
+        .enable_i   (enable_local_q),
+        .timestep_i (timestep_local_q),
+        .init_i     (init_local_q),
+        .core_done_o(core_done_d),
+        .core_idle_o(core_idle_d),
+        .packet_in_ready_o(router_to_core_ready),
+        .packet_in_valid_i(router_to_core_valid),
+        .packet_in_data_i (router_to_core_data),
+        .packet_out_ready_i(core_to_router_ready),
+        .packet_out_valid_o(core_to_router_valid),
+        .packet_out_data_o (core_to_router_data)
+      );
+    end else if (CORE_TYPE == "CONV1D") begin : gen_conv1d_core
+      Conv1dCore #(
+        .CORE_ID_X(GRID_X_ID),
+        .CORE_ID_Y(GRID_Y_ID),
+        .CIN      (CONV1D_CIN),
+        .COUT     (CONV1D_COUT),
+        .LIN      (CONV1D_LIN),
+        .K        (CONV1D_K),
+        .STRIDE   (CONV1D_STRIDE),
+        .PAD      (CONV1D_PAD),
+        .DIL      (CONV1D_DIL),
+        .DEST_DX  (CONV1D_DEST_DX),
+        .DEST_DY  (CONV1D_DEST_DY)
       ) u_core (
         .clk_i      (clk_i),
         .rst_i      (rst_local_q),

@@ -13,7 +13,7 @@ from yana.train.neurons import create_hidden_cell, create_output_cell
 from yana.core.config import AcceleratorConfig
 
 def initialize_weights(module: torch.nn.Module, gain: float):
-    if isinstance(module, (torch.nn.Conv2d, torch.nn.Linear)):
+    if isinstance(module, (torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Linear)):
         xavier_uniform_(module.weight, gain=gain)
 
 
@@ -103,6 +103,10 @@ class CustomSequentialState(BaseNetwork):
                     if 'in_channels' not in layer_cfg.params or layer_cfg.params['in_channels'] is None or layer_cfg.params['in_channels'] == 'network_input_features':
                         layer_cfg.params['in_channels'] = self.get_next_input_features()
                     layer = torch.nn.Conv2d(**layer_cfg.params)
+                case "Conv1d":
+                    if 'in_channels' not in layer_cfg.params or layer_cfg.params['in_channels'] is None or layer_cfg.params['in_channels'] == 'network_input_features':
+                        layer_cfg.params['in_channels'] = self.get_next_input_features()
+                    layer = torch.nn.Conv1d(**layer_cfg.params)
                 case "hidden_cell" | "create_hidden_cell":
                     layer = create_hidden_cell(**layer_cfg.params, dt=self.dt, quant_config=self.quant_config_hidden)
                 case "output_cell" | "create_output_cell":

@@ -1,4 +1,4 @@
-"""Unit tests for event-driven Conv2d geometry (no RTL, no training)."""
+"""Unit tests for event-driven Conv2d geometry"""
 
 import os
 import sys

@@ -1,0 +1,32 @@
+# 2x2 mesh with a CONV1D PE at core 1 (x=1, y=0).
+# Layout:
+#   (0,0) INPUT    (1,0) CONV1D
+#   (0,1) HIDDEN   (1,1) OUTPUT
+
+num_cores_x: 2
+num_cores_y: 2
+
+neurons_per_core: 1024
+routes_per_core:  65536
+weights_per_core: 65536
+
+timestep_width: 16
+weight_sum_width: 31
+instruction_width: 8
+param_width: 56
+
+mem_init_targets:
+  synapse_weights: 0
+  axon_mapping: 1
+  axon_routes: 2
+  spike_threshold: 3
+  tau_mem_inv: 4
+  leak_lut: 5
+
+core_configs:
+  0: "yana/core/config/default/core_input.yaml"
+  1: "yana/core/config/default/core_conv1d.yaml"
+  2: "yana/core/config/default/core_hidden.yaml"
+  3: "yana/core/config/default/core_output.yaml"
+
+platform_config: "yana/core/config/default/platform.yaml"

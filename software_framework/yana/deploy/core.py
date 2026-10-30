@@ -7,7 +7,8 @@ from yana.deploy.fixed_point import FixedPoint, float_to_fixed_point, max_value,
 from yana.core.logging import verbose
 
 from yana.core.config import CoreConfig
-from yana.deploy.conv import ConvGeometry, expand_input_axon
+from yana.deploy.conv import ConvGeometry, expand_input_axon as expand_input_axon_2d
+from yana.deploy.conv1d import Conv1dGeometry, expand_input_axon as expand_input_axon_1d
 
 class Route(NamedTuple):
     target_core: int
@@ -16,20 +17,22 @@ class Route(NamedTuple):
 
 GlobalID = Tuple[str, int]
 
+_PE_CORE_TYPES = (CoreConfig.Type.CONV, CoreConfig.Type.CONV1D)
+
 
 @dataclass
 class ConvRuntime:
-    """State kept on a CONV core: geometry plus dest lookup for the following LIF layer.
+    """State kept on a CONV / CONV1D core: geometry plus dest lookup for the following LIF layer.
     
     Attributes:
-        geom: Conv2d geometry used by the PE
+        geom: Conv2d or Conv1d geometry used by the PE
         dest_layer: NIR name of the dest LIF layer
         dest_core_of_neuron: Mesh core id per flattened output neuron
         dest_local_of_neuron: Core-local neuron id per flattened output neuron
         zero_taps: Tap ids with zero weight (skipped at expand time)
         pending_axons: Input axon ids queued for the next expand step
     """
-    geom: ConvGeometry
+    geom: object
     dest_layer: str
     dest_core_of_neuron: List[int]
     dest_local_of_neuron: List[int]
@@ -44,13 +47,13 @@ def _to_float32(x: float) -> float:
         x: Value to round
         
     Returns:
-        ``x`` after a float32 round-trip
+        x after a float32 round-trip
     """
     return struct.unpack('f', struct.pack('f', x))[0]
 
 
 def _next_power_of_2(x: int) -> int:
-    """Return the smallest power of two ``>= x`` (``1`` if ``x == 0``).
+    """Return the smallest power of two >= x (1 if x == 0).
     
     Args:
         x: Non-negative integer
@@ -63,7 +66,7 @@ def _next_power_of_2(x: int) -> int:
 
 
 def _effective_leak_lut_len(tau_mem_inv: float, hardware_len: int) -> int:
-    """Training-effective leak LUT length ``min(next_power_of_2(1/tau), hardware_len)``.
+    """Training-effective leak LUT length min(next_power_of_2(1/tau), hardware_len).
     
     Hardware may expose a longer LUT; sim truncates to this length so sparse
     layers (e.g. Conv→LIF) stay bit-exact with the torch model.
@@ -87,7 +90,7 @@ def _create_leak_lut(core_config: CoreConfig) -> List[FixedPoint]:
         core_config: Core configuration (tau, leak enable, hardware LUT depth)
         
     Returns:
-        LUT entries of length ``effective`` (empty if leak is disabled).
+        LUT entries of length effective (empty if leak is disabled).
         Export pads zeros out to the full hardware depth.
     """
     if not core_config.neuron_config.leak_enabled:
@@ -158,9 +161,9 @@ class Core():
 
     def apply_input(self, dest_enc_spike: Route):
         assert dest_enc_spike.target_core == self.id, f"Wrong target core id: required {self.id}, got {dest_enc_spike.target_core}"
-        if self.config.type == CoreConfig.Type.CONV:
-            assert self.conv is not None, f"CONV core {self.id} has no conv runtime"
-            # Incoming event payload.neuron_id is the flattened input axon (cin, y, x).
+        if self.config.type in _PE_CORE_TYPES:
+            assert self.conv is not None, f"PE core {self.id} has no conv runtime"
+            # Incoming event payload.neuron_id is the flattened input axon.
             self.conv.pending_axons.append(dest_enc_spike.target_neuron)
             return
         # trace(f"    Spike: core [{dest_enc_spike.target_core}], neuron [{dest_enc_spike.target_neuron}], synapse [{dest_enc_spike.target_synapse}]")
@@ -178,7 +181,7 @@ class Core():
         # trace(f"        Weight sum after:  {weight_sum_curr}")
 
     def apply_update(self, timestep: int, force_update: bool = False, injected_spikes: Optional[List[int]] = None) -> List[Route]:
-        if self.config.type == CoreConfig.Type.CONV:
+        if self.config.type in _PE_CORE_TYPES:
             return self._conv_expand()
 
         src_enc_spikes = injected_spikes if injected_spikes is not None else []
@@ -300,8 +303,8 @@ class Core():
     def add_weight_sequential(self, weight_value: float) -> int:
         """Append a weight at the next index even if the value is 0 or a duplicate.
         
-        CONV kernel taps are addressed geometrically (``tap_id``), so slots must
-        stay aligned with ``(cout, cin, ky, kx)`` rather than unique-value packed.
+        CONV kernel taps are addressed geometrically (tap_id), so slots must
+        stay aligned with (cout, cin, ky, kx) rather than unique-value packed.
         
         Args:
             weight_value: Floating-point synaptic weight
@@ -319,12 +322,19 @@ class Core():
         """Expand pending input axons into dest-encoded charge routes.
         
         Returns:
-            List of ``Route(dest_core, dest_neuron, tap_id)`` for non-zero taps
+            List of Route(dest_core, dest_neuron, tap_id) for non-zero taps
         """
-        assert self.conv is not None, f"CONV core {self.id} has no conv runtime"
+        assert self.conv is not None, f"PE core {self.id} has no conv runtime"
         dest_enc_spikes: List[Route] = []
+        geom = self.conv.geom
+        if isinstance(geom, Conv1dGeometry):
+            expand_fn = expand_input_axon_1d
+        elif isinstance(geom, ConvGeometry):
+            expand_fn = expand_input_axon_2d
+        else:
+            raise TypeError(f"Unsupported conv geometry type: {type(geom)!r}")
         for axon_id in self.conv.pending_axons:
-            for charge in expand_input_axon(self.conv.geom, axon_id):
+            for charge in expand_fn(geom, axon_id):
                 if charge.tap_id in self.conv.zero_taps:
                     continue
                 dest_core_id = self.conv.dest_core_of_neuron[charge.dest_neuron]

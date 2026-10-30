@@ -11,7 +11,8 @@ module Mesh #(
   parameter integer NODE_DONE_IN_MAX_CNT = NODE_DONE_IN_MAX_CNT_G,
   parameter integer NODE_IDLE_IN_MAX_CNT = NODE_IDLE_IN_MAX_CNT_G,
 
-  // Optional CONV PE. Default 0 keeps the original INPUT/FULL/OUTPUT map
+  // Optional CONV / CONV1D PE. Default 0 keeps the original INPUT/FULL/OUTPUT map.
+  // HAS_CONV and HAS_CONV1D must not both be set.
   parameter bit     HAS_CONV      = 0,
   parameter integer CONV_X        = 1,
   parameter integer CONV_Y        = 0,
@@ -28,7 +29,20 @@ module Mesh #(
   parameter integer CONV_PAD_H    = 0,
   parameter integer CONV_PAD_W    = 0,
   parameter integer CONV_DIL_H    = 1,
-  parameter integer CONV_DIL_W    = 1
+  parameter integer CONV_DIL_W    = 1,
+
+  parameter bit     HAS_CONV1D      = 0,
+  parameter integer CONV1D_X        = 1,
+  parameter integer CONV1D_Y        = 0,
+  parameter integer CONV1D_DEST_X   = 0,
+  parameter integer CONV1D_DEST_Y   = 1,
+  parameter integer CONV1D_CIN      = 1,
+  parameter integer CONV1D_COUT     = 1,
+  parameter integer CONV1D_LIN      = 16,
+  parameter integer CONV1D_K        = 3,
+  parameter integer CONV1D_STRIDE   = 1,
+  parameter integer CONV1D_PAD      = 0,
+  parameter integer CONV1D_DIL      = 1
 ) (
   input  logic clk_i,
 
@@ -430,6 +444,7 @@ module Mesh #(
             (gi == 0 && gj == 0)         ? "INPUT"  :
             (gi == X-1 && gj == Y-1)     ? "OUTPUT" :
             (HAS_CONV && gi == CONV_X && gj == CONV_Y) ? "CONV" :
+            (HAS_CONV1D && gi == CONV1D_X && gj == CONV1D_Y) ? "CONV1D" :
                                            "FULL"),
           .GRID_X_ID             (gi),
           .GRID_Y_ID             (gj),
@@ -447,7 +462,16 @@ module Mesh #(
           .CONV_DIL_H            (CONV_DIL_H),
           .CONV_DIL_W            (CONV_DIL_W),
           .CONV_DEST_DX          (CONV_DEST_X - CONV_X),
-          .CONV_DEST_DY          (CONV_Y - CONV_DEST_Y)
+          .CONV_DEST_DY          (CONV_Y - CONV_DEST_Y),
+          .CONV1D_CIN            (CONV1D_CIN),
+          .CONV1D_COUT           (CONV1D_COUT),
+          .CONV1D_LIN            (CONV1D_LIN),
+          .CONV1D_K              (CONV1D_K),
+          .CONV1D_STRIDE         (CONV1D_STRIDE),
+          .CONV1D_PAD            (CONV1D_PAD),
+          .CONV1D_DIL            (CONV1D_DIL),
+          .CONV1D_DEST_DX        (CONV1D_DEST_X - CONV1D_X),
+          .CONV1D_DEST_DY        (CONV1D_Y - CONV1D_DEST_Y)
         ) u_node (
           .clk_i(clk_i),
 

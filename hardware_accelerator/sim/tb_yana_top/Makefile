@@ -14,11 +14,13 @@ TRACE_EXE := $(TRACE_DIR)/V$(TOP)
 #   make run-fast ARGS="+datasets=shd_0 +num_samples=1"
 #   make run-fast TIMEOUT=60000000
 #   make run-fast DATASETS=nmnist_conv_stress NUM_SAMPLES=10 HAS_CONV=1
+#   make run-fast DATASETS=shd_conv1d_0 NUM_SAMPLES=1 HAS_CONV1D=1
 DATASETS    ?=
 NUM_SAMPLES ?=
 TIMEOUT     ?=
 ARGS        ?=
 HAS_CONV    ?= 0
+HAS_CONV1D  ?= 0
 
 # Number of parallel jobs for Verilator's C++ build step.
 # Override with: make build JOBS=4
@@ -29,8 +31,10 @@ SIM_ARGS := $(strip $(ARGS) \
     $(if $(NUM_SAMPLES),+num_samples=$(NUM_SAMPLES)) \
     $(if $(TIMEOUT),+timeout_ns=$(TIMEOUT)))
 
-# Elaboration-time CONV PE enable (TB defaults match 17x17 NMNIST conv geometry).
-GFLAGS := $(if $(filter 1,$(HAS_CONV)),-GHAS_CONV=1,)
+# Elaboration-time CONV / CONV1D PE enable (mutually exclusive).
+GFLAGS := \
+    $(if $(filter 1,$(HAS_CONV)),-GHAS_CONV=1,) \
+    $(if $(filter 1,$(HAS_CONV1D)),-GHAS_CONV1D=1,)
 
 COMMON_FLAGS := \
     $(VLT) \

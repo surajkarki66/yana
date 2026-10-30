@@ -15,8 +15,8 @@ module YanaTop #(
     // Control unit
     parameter CONTROL_UNIT_STATUS_REGISTER_WIDTH = CONTROL_UNIT_STATUS_REGISTER_WIDTH_G,
 
-    // Optional CONV PE (default off).
-    // Values should match deploy export conv_pe_params.txt.
+    // Optional CONV / CONV1D PE (default off).
+    // Values should match deploy export conv_pe_params.txt / conv1d_pe_params.txt.
     parameter bit     HAS_CONV      = 0,
     parameter integer CONV_X        = 1,
     parameter integer CONV_Y        = 0,
@@ -33,7 +33,20 @@ module YanaTop #(
     parameter integer CONV_PAD_H    = 0,
     parameter integer CONV_PAD_W    = 0,
     parameter integer CONV_DIL_H    = 1,
-    parameter integer CONV_DIL_W    = 1
+    parameter integer CONV_DIL_W    = 1,
+
+    parameter bit     HAS_CONV1D      = 0,
+    parameter integer CONV1D_X        = 1,
+    parameter integer CONV1D_Y        = 0,
+    parameter integer CONV1D_DEST_X   = 0,
+    parameter integer CONV1D_DEST_Y   = 1,
+    parameter integer CONV1D_CIN      = 1,
+    parameter integer CONV1D_COUT     = 1,
+    parameter integer CONV1D_LIN      = 16,
+    parameter integer CONV1D_K        = 3,
+    parameter integer CONV1D_STRIDE   = 1,
+    parameter integer CONV1D_PAD      = 0,
+    parameter integer CONV1D_DIL      = 1
 )(
     input  logic clk_i,
     input  logic rstn_i,
@@ -203,7 +216,19 @@ module YanaTop #(
         .CONV_PAD_H   (CONV_PAD_H),
         .CONV_PAD_W   (CONV_PAD_W),
         .CONV_DIL_H   (CONV_DIL_H),
-        .CONV_DIL_W   (CONV_DIL_W)
+        .CONV_DIL_W   (CONV_DIL_W),
+        .HAS_CONV1D     (HAS_CONV1D),
+        .CONV1D_X       (CONV1D_X),
+        .CONV1D_Y       (CONV1D_Y),
+        .CONV1D_DEST_X  (CONV1D_DEST_X),
+        .CONV1D_DEST_Y  (CONV1D_DEST_Y),
+        .CONV1D_CIN     (CONV1D_CIN),
+        .CONV1D_COUT    (CONV1D_COUT),
+        .CONV1D_LIN     (CONV1D_LIN),
+        .CONV1D_K       (CONV1D_K),
+        .CONV1D_STRIDE  (CONV1D_STRIDE),
+        .CONV1D_PAD     (CONV1D_PAD),
+        .CONV1D_DIL     (CONV1D_DIL)
     ) u_mesh (
         .clk_i           (clk_i),
         .rst_i           (cu_out_rst_gen),

@@ -12,7 +12,7 @@ from tonic.collation import PadTensors
 from tonic.cached_dataset import DiskCachedDataset
 
 from .augmented_transform import parse_augmented_transform
-from .custom_transforms import PadSliceToBins, ExpandDims
+from .custom_transforms import PadSliceToBins, ToChannelsLength
 
 def _get_dataset_by_name(dataset: str, save_to: str, transform: Optional[Callable], target_transform: Optional[Callable]):
     if dataset == "DVSGesture":
@@ -73,13 +73,17 @@ def _construct_transform(cfg: TransformCfg, sensor_size: tuple, augmentation_ena
         raise Exception("set either cfg.time_window and/or cfg.n_time_bins")
 
     if sensor_size[1] == 1:
-        # for 1D data like SHD, SMNIST ...
-        transforms.append(ExpandDims())
+        # 1D sensors (SHD, …): ToFrame → (T, C, 1, L); collapse to (T, C, L).
+        # Return sensor size as (L, C) so Model dummy input is (N, C, L).
+        transforms.append(ToChannelsLength())
+        sensor_size_out = (sensor_size_scaled[0], sensor_size_scaled[2])
+    else:
+        sensor_size_out = sensor_size_scaled
 
     transforms.append(tonic.transforms.NumpyAsType(np.float32))
     transform = tonic.transforms.Compose(transforms)
     target_transform = None
-    return transform, target_transform, sensor_size_scaled
+    return transform, target_transform, sensor_size_out
 
 
 def get_dataset(cfg: DatasetCfg):

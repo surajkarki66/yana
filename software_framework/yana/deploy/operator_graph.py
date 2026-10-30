@@ -5,7 +5,6 @@ import nir
 
 TRANSPARENT_OPS = [nir.Flatten]
 UNSUPPORTED_OPS = [
-    nir.Conv1d,
     nir.Delay,
     nir.NIRGraph,
     nir.Scale,

@@ -24,7 +24,22 @@ module tb_yana_top #(
     parameter integer CONV_PAD_H    = 1,
     parameter integer CONV_PAD_W    = 1,
     parameter integer CONV_DIL_H    = 1,
-    parameter integer CONV_DIL_W    = 1
+    parameter integer CONV_DIL_W    = 1,
+
+    // Optional CONV1D PE — defaults match SHD conv1d deploy (conv1d_pe_params.txt).
+    // Enable with verilator -GHAS_CONV1D=1 (mutually exclusive with HAS_CONV).
+    parameter bit     HAS_CONV1D      = 0,
+    parameter integer CONV1D_X        = 1,
+    parameter integer CONV1D_Y        = 0,
+    parameter integer CONV1D_DEST_X   = 0,
+    parameter integer CONV1D_DEST_Y   = 1,
+    parameter integer CONV1D_CIN      = 1,
+    parameter integer CONV1D_COUT     = 5,
+    parameter integer CONV1D_LIN      = 175,
+    parameter integer CONV1D_K        = 7,
+    parameter integer CONV1D_STRIDE   = 1,
+    parameter integer CONV1D_PAD      = 1,
+    parameter integer CONV1D_DIL      = 1
 )();
 
     localparam int CLOCK_PERIOD  = 10;
@@ -166,7 +181,19 @@ module tb_yana_top #(
         .CONV_PAD_H                        (CONV_PAD_H),
         .CONV_PAD_W                        (CONV_PAD_W),
         .CONV_DIL_H                        (CONV_DIL_H),
-        .CONV_DIL_W                        (CONV_DIL_W)
+        .CONV_DIL_W                        (CONV_DIL_W),
+        .HAS_CONV1D                        (HAS_CONV1D),
+        .CONV1D_X                          (CONV1D_X),
+        .CONV1D_Y                          (CONV1D_Y),
+        .CONV1D_DEST_X                     (CONV1D_DEST_X),
+        .CONV1D_DEST_Y                     (CONV1D_DEST_Y),
+        .CONV1D_CIN                        (CONV1D_CIN),
+        .CONV1D_COUT                       (CONV1D_COUT),
+        .CONV1D_LIN                        (CONV1D_LIN),
+        .CONV1D_K                          (CONV1D_K),
+        .CONV1D_STRIDE                     (CONV1D_STRIDE),
+        .CONV1D_PAD                        (CONV1D_PAD),
+        .CONV1D_DIL                        (CONV1D_DIL)
     ) uut (
         .clk_i          (uut_clk_i),
         .rstn_i         (uut_rstn_i),
@@ -1090,8 +1117,9 @@ module tb_yana_top #(
     endtask
 
     task automatic reset_between_samples(input int max_timestep);
-        // Skip the CONV PE tile — it has no LIF neuron-state RAM.
-        if (!(HAS_CONV && CONV_X == 1 && CONV_Y == 0)) begin
+        // Skip CONV / CONV1D PE tiles — they have no LIF neuron-state RAM.
+        if (!(HAS_CONV && CONV_X == 1 && CONV_Y == 0) &&
+            !(HAS_CONV1D && CONV1D_X == 1 && CONV1D_Y == 0)) begin
             issue_cu_reset(
                 RESET_STATES,
                 "neuron state reset (core 1:0)",

@@ -10,8 +10,9 @@ from yana.core.logging import info, verbose, trace, error, warn
 
 from yana.core.config import AcceleratorConfig, CoreConfig
 
-from .core import Core, ConvRuntime, Route
+from .core import Core, ConvRuntime, Route, _PE_CORE_TYPES
 from .conv import ConvGeometry, as_pair
+from .conv1d import Conv1dGeometry
 from .mapping import CoreMap
 from .operator_graph import OperatorGraph, Operator
 
@@ -125,6 +126,7 @@ class Accelerator():
         input_core = None
         output_core = None
         conv_core = None
+        conv1d_core = None
         self.cores = {}
 
         for id, core_config in acc_config.core_configs.items():
@@ -139,18 +141,23 @@ class Accelerator():
             if core_config.type == CoreConfig.Type.CONV:
                 assert conv_core is None, "Only a single CONV core is allowed"
                 conv_core = self.cores[id]
+            if core_config.type == CoreConfig.Type.CONV1D:
+                assert conv1d_core is None, "Only a single CONV1D core is allowed"
+                conv1d_core = self.cores[id]
 
         assert input_core is not None, "Input core is required."
         assert output_core is not None, "Output core is required."
         self.input_core = input_core
         self.output_core = output_core
         self.conv_core = conv_core
+        self.conv1d_core = conv1d_core
 
         # These are the node sequences supported by the accelerator
         self.VALID_SEQUENCES: List[Tuple[OpSequence, Callable[[List[Operator]], None]]] = [
             ([nir.Input], self._add_input),
-            # v1: Conv2d feeds a spiking feature-map LIF on HIDDEN cores only.
+            # v1: Conv2d / Conv1d feed a spiking feature-map LIF on HIDDEN cores only.
             ([nir.Conv2d, nir.LIF], self._add_conv),
+            ([nir.Conv1d, nir.LIF], self._add_conv1d),
             ([(nir.Affine, nir.Linear), (nir.LIF, nir.LI, nir.I)], self._add_linear),
             ([nir.Output], self._add_output)
         ]
@@ -300,8 +307,8 @@ class Accelerator():
                     if route.target_core not in self.cores:
                         continue
                     dest_core = self.cores[route.target_core]
-                    if dest_core.config.type == CoreConfig.Type.CONV:
-                        # CONV has no per-axon LIF neurons; every input axon lands on the PE.
+                    if dest_core.config.type in _PE_CORE_TYPES:
+                        # CONV / CONV1D have no per-axon LIF neurons; every input axon lands on the PE.
                         dummy = next(iter(dest_core.neuron_id_map.keys()))[0]
                         target = (dest_core.id, dummy)
                     else:
@@ -590,6 +597,167 @@ class Accelerator():
         info(
             f"  CONV PE: in=({in_ch},{in_h},{in_w}) k={k_h}x{k_w} stride={geom.stride} "
             f"pad={geom.padding} -> out=({out_ch},{geom.out_h},{geom.out_w}), "
+            f"taps={geom.n_taps}, dest_core={dest_core_id}"
+        )
+
+    def _add_conv1d(self, sequence: List[Operator]):
+        """Map Conv1d → LIF onto the CONV1D PE + dest hidden cores (shared kernel)."""
+        info(f"Conv1d sequence: {[op.name for op in sequence]}")
+        conv_op, act_op = sequence[0], sequence[1]
+        conv_node = conv_op.nir_node
+        act_node = act_op.nir_node
+        assert isinstance(conv_node, nir.Conv1d)
+        assert isinstance(act_node, nir.LIF)
+        if self.conv1d_core is None:
+            raise ValueError(
+                "Graph contains Conv1d but no CONV1D core is configured. "
+                "Use yana/core/config/default/accelerator_conv1d.yaml "
+                "(or add a core with type CONV1D)."
+            )
+
+        groups = int(np.asarray(conv_node.groups).reshape(-1)[0]) if conv_node.groups is not None else 1
+        assert groups == 1, f"Grouped Conv1d is not supported (groups={groups})"
+        if conv_node.bias is not None:
+            assert _is_zero(conv_node.bias), "Bias is not allowed for Conv1d on YANA."
+
+        assert len(conv_op.pre_ops) == 1, "Conv1d must have a single predecessor"
+        pre_op = conv_op.pre_ops[0]
+        pre_node = pre_op.nir_node
+        assert isinstance(pre_node, (nir.Input, nir.LIF)), (
+            f"Conv1d predecessor must be Input or LIF, found {type(pre_node).__name__}"
+        )
+
+        if isinstance(conv_node.weight, torch.Tensor):
+            weights = conv_node.weight.detach().cpu().numpy()
+        else:
+            weights = np.asarray(conv_node.weight)
+        assert weights.ndim == 3, f"Conv1d weight must be 3-D, got {weights.shape}"
+        out_ch, in_ch, k = (int(x) for x in weights.shape)
+
+        in_shape = np.asarray(
+            next(iter(pre_node.input_type.values() if isinstance(pre_node, nir.Input)
+                      else pre_node.output_type.values()))
+        ).astype(int).tolist()
+        if len(in_shape) == 1:
+            in_length = int(in_shape[0])
+            assert in_ch == 1, f"1-D input shape {in_shape} but kernel has Cin={in_ch}"
+        elif len(in_shape) == 2:
+            # NIR / frame layout is (C, L)
+            c_in, in_length = int(in_shape[0]), int(in_shape[1])
+            assert c_in == in_ch, f"Input channels {c_in} != kernel Cin {in_ch}"
+        else:
+            raise ValueError(f"Unsupported Conv1d input shape {in_shape}")
+
+        def _as_int(value, default: int = 1) -> int:
+            if value is None:
+                return default
+            arr = np.asarray(value).reshape(-1)
+            return int(arr[0])
+
+        geom = Conv1dGeometry(
+            in_channels=in_ch,
+            out_channels=out_ch,
+            in_length=in_length,
+            kernel_size=k,
+            stride=_as_int(conv_node.stride, 1),
+            padding=_as_int(conv_node.padding, 0),
+            dilation=_as_int(conv_node.dilation, 1) if conv_node.dilation is not None else 1,
+        )
+
+        n_in = geom.n_in_axons
+        n_out = geom.n_out_neurons
+        assert n_in <= self.acc_config.neurons_per_core, (
+            f"Conv1d input axons {n_in} exceed neuron_id width "
+            f"({self.acc_config.neurons_per_core}). Increase neurons_per_core or reduce C·L."
+        )
+        assert n_out <= self.acc_config.neurons_per_core, (
+            f"Conv1d feature map ({out_ch}, {geom.out_length}) = {n_out} neurons "
+            f"exceeds neurons_per_core={self.acc_config.neurons_per_core}. "
+            f"v1 RTL sends all charges to one HIDDEN core (fixed DEST_DX/DY)."
+        )
+
+        layer_name = act_op.name
+        pre_layer_name = pre_op.name
+        pe_core = self.conv1d_core
+
+        pe_core.add_neuron((conv_op.name, 0), compress=True)
+
+        if self.validate_neuron_params:
+            hidden_ids = [cid for cid, c in self.cores.items() if c.config.type == CoreConfig.Type.HIDDEN]
+            assert hidden_ids, "Conv1d → LIF requires at least one HIDDEN core"
+            _validate_neuron_params(act_node, self.cores[hidden_ids[0]], self.constraints_fatal)
+
+        dest_core_of_neuron: List[int] = []
+        dest_local_of_neuron: List[int] = []
+        dest_cores_used: Dict[int, Core] = {}
+        for neuron_id in range(n_out):
+            dest_core_id = self.core_map[layer_name][neuron_id]
+            dest_core = self.cores[dest_core_id]
+            assert dest_core.config.type == CoreConfig.Type.HIDDEN, (
+                f"Conv1d LIF neurons must be mapped to HIDDEN cores, got {dest_core.config.type.name}"
+            )
+            local_id = dest_core.add_neuron((layer_name, neuron_id), compress=False)
+            assert local_id == neuron_id, (
+                f"Conv1d feature-map neuron {neuron_id} mapped to local id {local_id}; "
+                f"RTL Conv1dPE addresses neurons geometrically and requires identity mapping."
+            )
+            dest_core_of_neuron.append(dest_core_id)
+            dest_local_of_neuron.append(local_id)
+            dest_cores_used[dest_core_id] = dest_core
+
+        assert len(dest_cores_used) == 1, (
+            f"v1 CONV1D PE has a single fixed NoC destination (DEST_DX/DY); "
+            f"feature-map LIF must sit on one HIDDEN core, got {sorted(dest_cores_used.keys())}"
+        )
+
+        zero_taps: set = set()
+        for dest_core in dest_cores_used.values():
+            assert len(dest_core.weights) == 0, (
+                f"CONV1D kernel must occupy the start of dest core {dest_core.id} weight RAM "
+                f"(found {len(dest_core.weights)} existing weights)"
+            )
+            for cout in range(out_ch):
+                for cin in range(in_ch):
+                    for kx in range(k):
+                        tap_id = dest_core.add_weight_sequential(float(weights[cout, cin, kx]))
+                        if dest_core.weights[tap_id].value == 0:
+                            zero_taps.add(tap_id)
+
+        pe_core.conv = ConvRuntime(
+            geom=geom,
+            dest_layer=layer_name,
+            dest_core_of_neuron=dest_core_of_neuron,
+            dest_local_of_neuron=dest_local_of_neuron,
+            zero_taps=zero_taps,
+        )
+
+        dest_core_id = next(iter(dest_cores_used))
+        pe_core.add_route((conv_op.name, 0), Route(dest_core_id, 0, 0))
+
+        for axon_id in range(n_in):
+            if isinstance(pre_node, nir.Input):
+                source_core = self.input_core
+            else:
+                pre_core_id = self.core_map[pre_layer_name][axon_id]
+                source_core = self.cores[pre_core_id]
+                if source_core.get_core_local_id((pre_layer_name, axon_id)) == -1:
+                    continue
+            route = Route(pe_core.id, axon_id, 0)
+            source_core.add_route((pre_layer_name, axon_id), route)
+
+        cfg = pe_core.config.conv1d_config
+        if cfg is not None:
+            cfg.in_channels = in_ch
+            cfg.out_channels = out_ch
+            cfg.kernel_size = k
+            cfg.stride = geom.stride
+            cfg.padding = geom.padding
+            cfg.dilation = geom.dilation
+            cfg.in_length = in_length
+
+        info(
+            f"  CONV1D PE: in=({in_ch},{in_length}) k={k} stride={geom.stride} "
+            f"pad={geom.padding} -> out=({out_ch},{geom.out_length}), "
             f"taps={geom.n_taps}, dest_core={dest_core_id}"
         )
 

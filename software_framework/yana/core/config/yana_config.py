@@ -156,17 +156,17 @@ class QuantConfig(ConfigModel):
 class ConvConfig(ConfigModel):
     """Shape of the CONV PE mapped onto a CONV core.
     
-    Deploy fills ``in_hw`` / channel counts from the NIR Conv2d node when they
+    Deploy fills in_hw / channel counts from the NIR Conv2d node when they
     are left at the defaults here. YAML may pin them for a fixed accelerator.
     
     Attributes:
         in_channels: Number of input channels (0 = fill from NIR)
         out_channels: Number of output channels (0 = fill from NIR)
-        kernel_size: Kernel size ``(kh, kw)``
-        stride: Stride ``(sh, sw)``
-        padding: Padding ``(ph, pw)``
-        dilation: Dilation ``(dh, dw)``
-        in_hw: Input spatial size ``(h, w)`` (``(0, 0)`` = fill from NIR)
+        kernel_size: Kernel size (kh, kw)
+        stride: Stride (sh, sw)
+        padding: Padding (ph, pw)
+        dilation: Dilation (dh, dw)
+        in_hw: Input spatial size (h, w) ((0, 0) = fill from NIR)
     """
     in_channels: int = 0
     out_channels: int = 0
@@ -188,17 +188,50 @@ class ConvConfig(ConfigModel):
         return v
 
 
+class Conv1dConfig(ConfigModel):
+    """Shape of the CONV1D PE mapped onto a CONV1D core.
+
+    Deploy fills in_length / channel counts from the NIR Conv1d node when
+    they are left at the defaults here.
+
+    Attributes:
+        in_channels: Number of input channels (0 = fill from NIR)
+        out_channels: Number of output channels (0 = fill from NIR)
+        kernel_size: Kernel length k
+        stride: Stride
+        padding: Padding
+        dilation: Dilation
+        in_length: Input sequence length (0 = fill from NIR)
+    """
+    in_channels: int = 0
+    out_channels: int = 0
+    kernel_size: int = 3
+    stride: int = 1
+    padding: int = 0
+    dilation: int = 1
+    in_length: int = 0
+
+    @field_validator("kernel_size", "stride", "padding", "dilation", mode="before")
+    @classmethod
+    def _coerce_scalar(cls, v: Any) -> int:
+        if isinstance(v, (list, tuple)):
+            return int(v[0])
+        return int(v)
+
+
 class CoreConfig(ConfigModel):
     class Type(Enum):
         INPUT   = 0
         HIDDEN  = 1
         OUTPUT  = 2
         CONV    = 3
+        CONV1D  = 4
 
     type: Type
     neuron_config: NeuronConfig
     quant_config: QuantConfig
     conv_config: Optional[ConvConfig] = None
+    conv1d_config: Optional[Conv1dConfig] = None
 
     @field_validator('type', mode='before')
     @classmethod
@@ -244,8 +277,12 @@ class AcceleratorConfig(ConfigModel):
         # Leak LUT width must be the same for all configurations
         unique_leak_lut_widths = set([core_config.quant_config.format_tau_inv_l.word_length for core_config in self.core_configs.values()])
         assert len(unique_leak_lut_widths) == 1, f"All cores must have identical weight sum widths. Got {unique_leak_lut_widths}"
-        # TODO: add more validation
-        # ...
+
+        has_conv = any(c.type == CoreConfig.Type.CONV for c in self.core_configs.values())
+        has_conv1d = any(c.type == CoreConfig.Type.CONV1D for c in self.core_configs.values())
+        assert not (has_conv and has_conv1d), (
+            "Accelerator may include either a CONV or a CONV1D core, not both"
+        )
 
         return self
 
@@ -303,6 +340,16 @@ class AcceleratorConfig(ConfigModel):
                     raise ValueError("Currently only a single CONV core is supported")
                 core_config_conv = core_config
         return core_config_conv
+
+    @property
+    def core_config_conv1d(self) -> Optional[CoreConfig]:
+        core_config_conv1d = None
+        for core_config in self.core_configs.values():
+            if core_config.type == CoreConfig.Type.CONV1D:
+                if core_config_conv1d is not None:
+                    raise ValueError("Currently only a single CONV1D core is supported")
+                core_config_conv1d = core_config
+        return core_config_conv1d
 
     #
     # General configuration

@@ -21,14 +21,15 @@ def write_accelerator_memories(accelerator: Accelerator, output_dir: str, accele
     assert os.path.exists(output_dir), f"Output directory '{output_dir}' does not exist"
     assert os.path.isdir(output_dir), f"'{output_dir}' is not a directory"
 
+    pe_types = (CoreConfig.Type.CONV, CoreConfig.Type.CONV1D)
     for core in accelerator.cores.values():
-        # CONV stores geometry in the PE, not in synapse/axon RAMs.
-        # Dummy hop-count routes on the CONV core must not be programmed into RTL.
-        is_conv = core.config.type == CoreConfig.Type.CONV
-        write_weights = core.config.type not in (CoreConfig.Type.INPUT, CoreConfig.Type.CONV)
-        write_routes  = core.config.type not in (CoreConfig.Type.OUTPUT, CoreConfig.Type.CONV)
-        # CONV has no LIF state machine; skip threshold / tau / leak init files.
-        write_neuron_params = not is_conv
+        # CONV / CONV1D store geometry in the PE, not in synapse/axon RAMs.
+        # Dummy hop-count routes on the PE core must not be programmed into RTL.
+        is_pe = core.config.type in pe_types
+        write_weights = core.config.type not in (CoreConfig.Type.INPUT, *pe_types)
+        write_routes  = core.config.type not in (CoreConfig.Type.OUTPUT, *pe_types)
+        # PE cores have no LIF state machine; skip threshold / tau / leak init files.
+        write_neuron_params = not is_pe
 
         write_core_memories(
             core, f"core_{core.id}",
@@ -42,6 +43,7 @@ def write_accelerator_memories(accelerator: Accelerator, output_dir: str, accele
         )
 
     write_conv_pe_config(accelerator, output_dir, accelerator_config)
+    write_conv1d_pe_config(accelerator, output_dir, accelerator_config)
 
 
 def write_conv_pe_config(
@@ -92,6 +94,47 @@ def write_conv_pe_config(
         f.write(f"CONV_OUT_W={geom.out_w}\n")
         f.write(f"CONV_N_TAPS={geom.n_taps}\n")
         f.write(f"CONV_DEST_CORE_ID={dest_core_id}\n")
+
+
+def write_conv1d_pe_config(
+    accelerator: Accelerator,
+    output_dir: str,
+    accelerator_config: AcceleratorConfig,
+    filename: str = "conv1d_pe_params.txt",
+):
+    """Write Mesh/Conv1dCore parameter values for RTL / TB overrides."""
+    from yana.deploy.conv1d import Conv1dGeometry
+
+    pe_core = getattr(accelerator, "conv1d_core", None)
+    if pe_core is None or pe_core.conv is None:
+        return
+    geom = pe_core.conv.geom
+    if not isinstance(geom, Conv1dGeometry):
+        return
+
+    dest_core_id = pe_core.conv.dest_core_of_neuron[0]
+    pe_x, pe_y = accelerator_config.core_id_to_xy(pe_core.id)
+    dest_x, dest_y = accelerator_config.core_id_to_xy(dest_core_id)
+
+    path = os.path.join(output_dir, filename)
+    with open(path, "w") as f:
+        f.write("# Auto-generated CONV1D PE parameters for Mesh / Conv1dCore\n")
+        f.write(f"HAS_CONV1D=1\n")
+        f.write(f"CONV1D_X={pe_x}\n")
+        f.write(f"CONV1D_Y={pe_y}\n")
+        f.write(f"CONV1D_DEST_X={dest_x}\n")
+        f.write(f"CONV1D_DEST_Y={dest_y}\n")
+        f.write(f"CONV1D_CIN={geom.in_channels}\n")
+        f.write(f"CONV1D_COUT={geom.out_channels}\n")
+        f.write(f"CONV1D_LIN={geom.in_length}\n")
+        f.write(f"CONV1D_K={geom.kernel_size}\n")
+        f.write(f"CONV1D_STRIDE={geom.stride}\n")
+        f.write(f"CONV1D_PAD={geom.padding}\n")
+        f.write(f"CONV1D_DIL={geom.dilation}\n")
+        f.write(f"CONV1D_OUT_L={geom.out_length}\n")
+        f.write(f"CONV1D_N_TAPS={geom.n_taps}\n")
+        f.write(f"CONV1D_DEST_CORE_ID={dest_core_id}\n")
+
 
 def write_input_events(
     input_events: List[Tuple[int, int]],

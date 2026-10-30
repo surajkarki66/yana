@@ -113,7 +113,7 @@ def tap_index(cout: int, cin: int, ky: int, kx: int, in_channels: int, k_h: int,
         k_w: Kernel width
         
     Returns:
-        Tap id ``((cout * Cin + cin) * Kh + ky) * Kw + kx``
+        Tap id ((cout * Cin + cin) * Kh + ky) * Kw + kx
     """
     return ((cout * in_channels + cin) * k_h + ky) * k_w + kx
 
@@ -128,7 +128,7 @@ def kernel_tap_count(out_channels: int, in_channels: int, k_h: int, k_w: int) ->
         k_w: Kernel width
         
     Returns:
-        ``out_channels * in_channels * k_h * k_w``
+        out_channels * in_channels * k_h * k_w
     """
     return out_channels * in_channels * k_h * k_w
 
@@ -142,10 +142,10 @@ class ConvGeometry:
         out_channels: Number of output channels
         in_h: Input height
         in_w: Input width
-        kernel: Kernel size ``(kh, kw)``
-        stride: Stride ``(sh, sw)``
-        padding: Padding ``(ph, pw)``
-        dilation: Dilation ``(dh, dw)``
+        kernel: Kernel size (kh, kw)
+        stride: Stride (sh, sw)
+        padding: Padding (ph, pw)
+        dilation: Dilation (dh, dw)
     """
     in_channels: int
     out_channels: int
@@ -158,7 +158,7 @@ class ConvGeometry:
 
     @property
     def out_hw(self) -> IntPair:
-        """Output spatial size ``(out_h, out_w)``."""
+        """Output spatial size (out_h, out_w)."""
         return conv_output_hw(
             self.in_h, self.in_w, self.kernel, self.stride, self.padding, self.dilation
         )
@@ -185,12 +185,12 @@ class ConvGeometry:
 
     @property
     def n_in_axons(self) -> int:
-        """Number of flattened input axons ``Cin * Hin * Win``."""
+        """Number of flattened input axons (Cin * Hin * Win)."""
         return self.in_channels * self.in_h * self.in_w
 
     @property
     def n_out_neurons(self) -> int:
-        """Number of flattened output LIF neurons ``Cout * Hout * Wout``."""
+        """Number of flattened output LIF neurons (Cout * Hout * Wout)."""
         return self.out_channels * self.out_h * self.out_w
 
     @property
@@ -199,13 +199,13 @@ class ConvGeometry:
         return kernel_tap_count(self.out_channels, self.in_channels, self.k_h, self.k_w)
 
     def decode_input(self, axon_id: int) -> Tuple[int, int, int]:
-        """Decode a flattened input axon id to ``(cin, iy, ix)``.
+        """Decode a flattened input axon id to (cin, iy, ix).
         
         Args:
             axon_id: Flattened input axon index
             
         Returns:
-            Tuple ``(cin, iy, ix)``
+            Tuple (cin, iy, ix)
         """
         return unflatten_nchw(axon_id, self.in_h, self.in_w)
 
@@ -269,7 +269,7 @@ def expand_input_spike(geom: ConvGeometry, cin: int, iy: int, ix: int) -> List[C
         ix: Input column of the spike
         
     Returns:
-        List of ``ConvCharge`` events (may be empty if fully out of bounds)
+        List of ConvCharge events (may be empty if fully out of bounds)
     """
     s_h, s_w = geom.stride
     p_h, p_w = geom.padding
@@ -305,10 +305,10 @@ def expand_input_axon(geom: ConvGeometry, axon_id: int) -> List[ConvCharge]:
     
     Args:
         geom: Conv2d geometry
-        axon_id: Flattened input axon id ``(cin, iy, ix)``
+        axon_id: Flattened input axon id (cin, iy, ix)
         
     Returns:
-        List of ``ConvCharge`` events (empty if ``axon_id`` is out of range)
+        List of ConvCharge events (empty if axon_id is out of range)
     """
     cin, iy, ix = geom.decode_input(axon_id)
     if cin < 0 or cin >= geom.in_channels or iy < 0 or iy >= geom.in_h or ix < 0 or ix >= geom.in_w:
@@ -317,13 +317,13 @@ def expand_input_axon(geom: ConvGeometry, axon_id: int) -> List[ConvCharge]:
 
 
 def dense_kernel_taps(weight: np.ndarray) -> np.ndarray:
-    """Flatten ``W[Cout, Cin, Kh, Kw]`` into tap-major order used by ``tap_index``.
+    """Flatten W[Cout, Cin, Kh, Kw] into tap-major order used by tap_index.
     
     Args:
-        weight: Dense Conv2d weight tensor of shape ``(Cout, Cin, Kh, Kw)``
+        weight: Dense Conv2d weight tensor of shape (Cout, Cin, Kh, Kw)
         
     Returns:
-        1-D array of length ``Cout * Cin * Kh * Kw`` in tap-id order
+        1-D array of length (Cout * Cin * Kh * Kw) in tap-id order
     """
     if weight.ndim != 4:
         raise ValueError(f"Conv2d weight must be 4-D (Cout, Cin, Kh, Kw), got shape {weight.shape}")
@@ -347,10 +347,10 @@ def reference_conv2d_from_events(
     Args:
         events: Iterable of flattened input axon ids that spiked
         geom: Conv2d geometry
-        weight: Dense kernel ``(Cout, Cin, Kh, Kw)``
+        weight: Dense kernel (Cout, Cin, Kh, Kw)
         
     Returns:
-        Accumulated charge of shape ``(Cout, Hout, Wout)``
+        Accumulated charge of shape (Cout, Hout, Wout)
     """
     acc = np.zeros((geom.out_channels, geom.out_h, geom.out_w), dtype=np.float64)
     w = np.asarray(weight)

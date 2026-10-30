@@ -180,6 +180,23 @@ class ExpandDims:
 
 
 @dataclass(frozen=True)
+class ToChannelsLength:
+    """Collapse singleton height/width so 1-D sensors become ``(T, C, L)``.
+
+    Tonic ``ToFrame`` for SHD-like sensors yields ``(T, C, 1, L)`` or
+    ``(T, C, L, 1)``. Conv1d (and Flatten→Linear) expect ``(T, C, L)``.
+    """
+
+    def __call__(self, target):
+        arr = np.asarray(target)
+        if arr.ndim == 4 and arr.shape[2] == 1:
+            return arr[:, :, 0, :]
+        if arr.ndim == 4 and arr.shape[3] == 1:
+            return arr[:, :, :, 0]
+        return arr
+
+
+@dataclass(frozen=True)
 class PadSliceToBins:
     pad_time_bins : int = 1
     mode : int = 1              # 1: cut/append at end -1: cut/prepend at front
