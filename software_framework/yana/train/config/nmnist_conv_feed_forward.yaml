@@ -29,7 +29,7 @@ model_cfg:
   network_type: "custom_sequential_state"
   network_cfg:
     layers:
-      # Input is (C, H, W) = (2, 17, 17) after ToFrame + spatial_factor 2.
+      # Input is (C, H, W) = (2, 17, 17)
       # Stride 2 keeps the feature map on one hidden core: 8 x 9 x 9 = 648 <= 1024.
       - type: "Conv2d"
         params:

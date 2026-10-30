@@ -426,7 +426,14 @@ class Accelerator():
         assert len(input_op.input_type) == 1, "Only one input tensor allowed."
 
     def _add_conv(self, sequence: List[Operator]):
-        """Map Conv2d → LIF onto the CONV PE + dest hidden cores (shared kernel, no unroll)."""
+        """Map Conv2d → LIF onto the CONV PE + dest hidden cores (shared kernel, no unroll).
+        
+        Args:
+            sequence: Operator list ``[Conv2d, LIF]`` from the NIR graph
+            
+        Raises:
+            ValueError: If no CONV core is configured or geometry exceeds constraints
+        """
         info(f"Conv sequence: {[op.name for op in sequence]}")
         conv_op, act_op = sequence[0], sequence[1]
         conv_node = conv_op.nir_node

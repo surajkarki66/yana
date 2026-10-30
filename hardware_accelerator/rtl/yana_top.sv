@@ -15,7 +15,7 @@ module YanaTop #(
     // Control unit
     parameter CONTROL_UNIT_STATUS_REGISTER_WIDTH = CONTROL_UNIT_STATUS_REGISTER_WIDTH_G,
 
-    // Optional CONV PE (default off — existing FF TBs unchanged).
+    // Optional CONV PE (default off).
     // Values should match deploy export conv_pe_params.txt.
     parameter bit     HAS_CONV      = 0,
     parameter integer CONV_X        = 1,

@@ -50,10 +50,14 @@ def write_conv_pe_config(
     accelerator_config: AcceleratorConfig,
     filename: str = "conv_pe_params.txt",
 ):
-    """Write Mesh/ConvCore parameter values for RTL bring-up / TB overrides.
-
-    Format (one ``key=value`` per line) matches the Mesh ``CONV_*`` parameters.
-    Absent when the accelerator has no CONV core.
+    """Write Mesh/ConvCore parameter values for RTL / TB overrides.
+    Format (one key=value per line) matches the Mesh CONV_* parameters.
+    
+    Args:
+        accelerator: Mapped accelerator
+        output_dir: Destination directory for the params file
+        accelerator_config: Accelerator config used for core-id → (x, y) mapping
+        filename: Output filename (default: conv_pe_params.txt)
     """
     conv_core = getattr(accelerator, "conv_core", None)
     if conv_core is None or conv_core.conv is None:

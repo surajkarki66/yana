@@ -8,7 +8,7 @@ module Node #(
   parameter integer GRID_Y_ID    = 0,
   parameter integer DEEPEST_NODE = 0,
 
-  // CONV PE shape (ignored unless CORE_TYPE == "CONV")
+  // CONV PE shape
   parameter integer CONV_CIN      = 1,
   parameter integer CONV_COUT     = 1,
   parameter integer CONV_HIN      = 8,

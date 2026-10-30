@@ -19,7 +19,16 @@ GlobalID = Tuple[str, int]
 
 @dataclass
 class ConvRuntime:
-    """State kept on a CONV core: geometry plus dest lookup for the following LIF layer."""
+    """State kept on a CONV core: geometry plus dest lookup for the following LIF layer.
+    
+    Attributes:
+        geom: Conv2d geometry used by the PE
+        dest_layer: NIR name of the dest LIF layer
+        dest_core_of_neuron: Mesh core id per flattened output neuron
+        dest_local_of_neuron: Core-local neuron id per flattened output neuron
+        zero_taps: Tap ids with zero weight (skipped at expand time)
+        pending_axons: Input axon ids queued for the next expand step
+    """
     geom: ConvGeometry
     dest_layer: str
     dest_core_of_neuron: List[int]
@@ -29,20 +38,42 @@ class ConvRuntime:
 
 
 def _to_float32(x: float) -> float:
-    """Round a float64 to float32 precision, matching PyTorch's default tensor dtype."""
+    """Round a float64 to float32 precision, matching PyTorch's default tensor dtype.
+    
+    Args:
+        x: Value to round
+        
+    Returns:
+        ``x`` after a float32 round-trip
+    """
     return struct.unpack('f', struct.pack('f', x))[0]
 
 
 def _next_power_of_2(x: int) -> int:
+    """Return the smallest power of two ``>= x`` (``1`` if ``x == 0``).
+    
+    Args:
+        x: Non-negative integer
+        
+    Returns:
+        Next power of two
+    """
     x = int(x)
     return 1 if x == 0 else 2 ** (x - 1).bit_length()
 
 
 def _effective_leak_lut_len(tau_mem_inv: float, hardware_len: int) -> int:
-    """Training truncates leak at ``next_power_of_2(1/tau)`` (see neuron factory).
-
-    Hardware may expose a longer LUT; entries at and beyond the training length must
-    be zero so sparse layers (e.g. Conv→LIF) stay bit-exact with the torch model.
+    """Training-effective leak LUT length ``min(next_power_of_2(1/tau), hardware_len)``.
+    
+    Hardware may expose a longer LUT; sim truncates to this length so sparse
+    layers (e.g. Conv→LIF) stay bit-exact with the torch model.
+    
+    Args:
+        tau_mem_inv: Inverse membrane time constant
+        hardware_len: Allocated hardware LUT depth
+        
+    Returns:
+        Effective number of LUT entries used by the software sim
     """
     if tau_mem_inv <= 0 or hardware_len <= 0:
         return hardware_len
@@ -50,6 +81,15 @@ def _effective_leak_lut_len(tau_mem_inv: float, hardware_len: int) -> int:
 
 
 def _create_leak_lut(core_config: CoreConfig) -> List[FixedPoint]:
+    """Build the per-core leak factor LUT matching the training truncation length.
+    
+    Args:
+        core_config: Core configuration (tau, leak enable, hardware LUT depth)
+        
+    Returns:
+        LUT entries of length ``effective`` (empty if leak is disabled).
+        Export pads zeros out to the full hardware depth.
+    """
     if not core_config.neuron_config.leak_enabled:
         return []
 
@@ -259,9 +299,15 @@ class Core():
 
     def add_weight_sequential(self, weight_value: float) -> int:
         """Append a weight at the next index even if the value is 0 or a duplicate.
-
+        
         CONV kernel taps are addressed geometrically (``tap_id``), so slots must
         stay aligned with ``(cout, cin, ky, kx)`` rather than unique-value packed.
+        
+        Args:
+            weight_value: Floating-point synaptic weight
+            
+        Returns:
+            Newly assigned weight / tap index
         """
         weight = float_to_fixed_point(weight_value, self.config.quant_config.format_weights)
         self.weights.append(weight)
@@ -270,6 +316,11 @@ class Core():
         return len(self.weights) - 1
 
     def _conv_expand(self) -> List[Route]:
+        """Expand pending input axons into dest-encoded charge routes.
+        
+        Returns:
+            List of ``Route(dest_core, dest_neuron, tap_id)`` for non-zero taps
+        """
         assert self.conv is not None, f"CONV core {self.id} has no conv runtime"
         dest_enc_spikes: List[Route] = []
         for axon_id in self.conv.pending_axons:

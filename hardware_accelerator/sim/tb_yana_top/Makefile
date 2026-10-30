@@ -13,7 +13,7 @@ TRACE_EXE := $(TRACE_DIR)/V$(TOP)
 #   make run-trace DATASETS=shd_0
 #   make run-fast ARGS="+datasets=shd_0 +num_samples=1"
 #   make run-fast TIMEOUT=60000000
-#   make run-fast DATASETS=nmnist_conv_fixed NUM_SAMPLES=1 HAS_CONV=1
+#   make run-fast DATASETS=nmnist_conv_stress NUM_SAMPLES=10 HAS_CONV=1
 DATASETS    ?=
 NUM_SAMPLES ?=
 TIMEOUT     ?=
@@ -29,7 +29,7 @@ SIM_ARGS := $(strip $(ARGS) \
     $(if $(NUM_SAMPLES),+num_samples=$(NUM_SAMPLES)) \
     $(if $(TIMEOUT),+timeout_ns=$(TIMEOUT)))
 
-# Elaboration-time CONV PE enable (TB defaults match NMNIST conv geometry).
+# Elaboration-time CONV PE enable (TB defaults match 17x17 NMNIST conv geometry).
 GFLAGS := $(if $(filter 1,$(HAS_CONV)),-GHAS_CONV=1,)
 
 COMMON_FLAGS := \

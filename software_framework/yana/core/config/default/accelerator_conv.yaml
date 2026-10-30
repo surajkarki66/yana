@@ -2,10 +2,7 @@
 # Layout:
 #   (0,0) INPUT   (1,0) CONV
 #   (0,1) HIDDEN  (1,1) OUTPUT
-#
-# RTL Mesh must be elaborated with HAS_CONV=1 and matching CONV_* parameters
-# (see deploy export file conv_pe_params.txt after mapping a Conv2d graph).
-# Default yana_top keeps HAS_CONV=0 so existing FF TBs are unchanged.
+
 num_cores_x: 2
 num_cores_y: 2
 

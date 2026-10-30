@@ -239,6 +239,17 @@ def write_core_tau_mem_inv(core: Core, acc_config: AcceleratorConfig, tau_mem_in
             f.write(f"{packet.hex()}\n")
 
 def write_core_leak_lut(core: Core, acc_config: AcceleratorConfig, leak_lut_file_path: str, as_events: bool = False):
+    """Write a core's leak LUT, padding zeros out to the hardware table depth.
+    
+    The software sim may store fewer entries than ``leak_lut_len`` (training
+    effective length). RTL init still needs the full address space filled.
+    
+    Args:
+        core: Core whose ``leak_lut`` should be exported
+        acc_config: Accelerator config (event-format metadata when ``as_events``)
+        leak_lut_file_path: Destination file path
+        as_events: If True, emit init-event packets; else hex addr/value pairs
+    """
     if not core.leak_lut:
         return
 

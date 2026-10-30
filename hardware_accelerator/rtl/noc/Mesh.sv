@@ -11,8 +11,7 @@ module Mesh #(
   parameter integer NODE_DONE_IN_MAX_CNT = NODE_DONE_IN_MAX_CNT_G,
   parameter integer NODE_IDLE_IN_MAX_CNT = NODE_IDLE_IN_MAX_CNT_G,
 
-  // Optional CONV PE. Default 0 keeps the original INPUT/FULL/OUTPUT map so
-  // existing feed-forward testbenches are unchanged.
+  // Optional CONV PE. Default 0 keeps the original INPUT/FULL/OUTPUT map
   parameter bit     HAS_CONV      = 0,
   parameter integer CONV_X        = 1,
   parameter integer CONV_Y        = 0,

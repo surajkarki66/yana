@@ -86,7 +86,7 @@ def _create_leak_quantizer(quant_config: QuantConfig) -> Quantizer:
     """Create leak factor LUT quantizer for LIF/LI neurons.
     
     Args:
-        quantconfig: Quantization configuration
+        quant_config: Quantization configuration
         
     Returns:
         Quantizer configured for leak factor LUT
@@ -99,9 +99,15 @@ def _create_leak_quantizer(quant_config: QuantConfig) -> Quantizer:
 
 def _compute_lut_length(tau_inv_mem: float) -> int:
     """Compute effective leak-LUT length: ``next_power_of_2(1 / tau_inv_mem)``.
-
-    The accelerator may allocate a longer hardware LUT; deploy zeros entries at
-    and beyond this length so sim matches training (see ``_create_leak_lut``).
+    
+    The accelerator may allocate a longer hardware LUT; deploy truncates the
+    sim LUT to this length so software matches training (see ``_create_leak_lut``).
+    
+    Args:
+        tau_inv_mem: Inverse membrane time constant
+        
+    Returns:
+        LUT length as the next power of two
     """
     return next_power_of_2(1 / tau_inv_mem)
 

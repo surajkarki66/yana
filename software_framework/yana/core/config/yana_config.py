@@ -155,9 +155,18 @@ class QuantConfig(ConfigModel):
 
 class ConvConfig(ConfigModel):
     """Shape of the CONV PE mapped onto a CONV core.
-
+    
     Deploy fills ``in_hw`` / channel counts from the NIR Conv2d node when they
     are left at the defaults here. YAML may pin them for a fixed accelerator.
+    
+    Attributes:
+        in_channels: Number of input channels (0 = fill from NIR)
+        out_channels: Number of output channels (0 = fill from NIR)
+        kernel_size: Kernel size ``(kh, kw)``
+        stride: Stride ``(sh, sw)``
+        padding: Padding ``(ph, pw)``
+        dilation: Dilation ``(dh, dw)``
+        in_hw: Input spatial size ``(h, w)`` (``(0, 0)`` = fill from NIR)
     """
     in_channels: int = 0
     out_channels: int = 0

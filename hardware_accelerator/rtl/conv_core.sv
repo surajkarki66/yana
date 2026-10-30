@@ -11,7 +11,7 @@
 //                  with fixed NoC hops DEST_DX/DEST_DY to the LIF core
 //                  that holds the shared Cout×Cin×Kh×Kw kernel in weight RAM.
 //
-// v1 limitation: one destination core only (no per-pixel dest map).
+
 module ConvCore #(
   parameter CORE_ID_X = 0,
   parameter CORE_ID_Y = 0,
