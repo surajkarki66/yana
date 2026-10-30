@@ -77,7 +77,7 @@ model_cfg:
     # Weight initialization
     weight_init_enable: true
     weight_init_type: "custom"
-    weight_init_gain: 4.0
+    weight_init_gain: 1.0
     weight_init_gain_ramp: 0.0
 
   optimizer_cfg:
